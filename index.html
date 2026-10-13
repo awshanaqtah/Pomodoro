@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <title>Pomodoro</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+
+  <body data-mode="focus" data-running="false">
+    <main class="widget" data-tauri-drag-region>
+      <header class="bar" data-tauri-drag-region>
+        <span class="brand" data-tauri-drag-region>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19c0-8 5-13 14-14-1 9-6 14-14 14Zm0 0 7-7" /></svg>
+          pomodoro
+        </span>
+        <div class="win">
+          <button id="pin" title="Keep on top" aria-pressed="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6l-1 6 3 3H7l3-3-1-6Zm3 9v7" /></svg>
+          </button>
+          <button id="min" title="Minimize">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12" /></svg>
+          </button>
+          <button id="close" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" /></svg>
+          </button>
+        </div>
+      </header>
+
+      <section class="dial" data-tauri-drag-region>
+        <svg class="ring" viewBox="0 0 200 200" aria-hidden="true">
+          <circle class="ring-track" cx="100" cy="100" r="88" />
+          <circle class="ring-progress" id="ring" cx="100" cy="100" r="88" />
+        </svg>
+        <div class="readout">
+          <span class="mode" id="mode">Focus</span>
+          <span class="time" id="time">25:00</span>
+          <span class="dots" id="dots"></span>
+        </div>
+      </section>
+
+      <nav class="controls">
+        <button id="reset" class="ghost" title="Reset (R)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4h4" /></svg>
+        </button>
+        <button id="toggle" class="play" title="Start / pause (Space)">
+          <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5L8 5.5Z" /></svg>
+          <svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14" /></svg>
+        </button>
+        <button id="skip" class="ghost" title="Skip (S)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 8 6-8 6V6Zm12 0v12" /></svg>
+        </button>
+      </nav>
+
+      <svg class="treeline" viewBox="0 0 300 60" preserveAspectRatio="none" aria-hidden="true">
+        <path class="far" d="M0 60V38l12-16 12 16 8-10 10 12 14-20 14 20 9-12 11 13 13-18 13 18 10-11 12 12 15-22 15 22 9-10 10 11 13-17 13 17 11-13 12 14 14-19 14 19 12-15 12 15 12-14 12 14V60Z" />
+        <path class="near" d="M0 60V48l8-10 8 10 6-6 7 8 10-14 10 14 7-8 8 9 11-13 11 13 6-7 8 8 12-16 12 16 7-8 8 9 10-12 10 12 9-11 9 11 12-15 12 15 8-9 8 9 11-14 11 14 9-10 9 10 12-15 12 15V60Z" />
+      </svg>
+    </main>
+  </body>
+</html>

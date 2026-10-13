@@ -1,0 +1,177 @@
+:root {
+  --bg: #13201a;
+  --bg-2: #1a2b22;
+  --text: #e6eee3;
+  --muted: #8ea393;
+  --track: rgba(230, 238, 227, 0.08);
+  --line: rgba(230, 238, 227, 0.1);
+  --far: #1f3428;
+  --near: #0e1813;
+
+  /* Accent follows the phase: ember while focusing, rain on short breaks, moss on long ones. */
+  --ember: #f08a3e;
+  --rain: #6fb3d2;
+  --moss: #8fcf8a;
+  --accent: var(--ember);
+
+  color-scheme: dark;
+  font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  color: var(--text);
+}
+
+body[data-mode="short"] { --accent: var(--rain); }
+body[data-mode="long"] { --accent: var(--moss); }
+
+* { box-sizing: border-box; }
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+}
+
+.widget {
+  position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  border-radius: 22px;
+  border: 1px solid var(--line);
+  background:
+    radial-gradient(120% 70% at 50% 0%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 70%),
+    linear-gradient(180deg, var(--bg-2), var(--bg));
+  overflow: hidden;
+  transition: background 0.6s ease;
+}
+
+svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+button {
+  display: grid;
+  place-items: center;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  background: none;
+  cursor: pointer;
+}
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* --- title bar --- */
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 12px 0 16px;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.brand svg { width: 14px; height: 14px; color: var(--accent); }
+.win { display: flex; gap: 2px; }
+.win button { width: 26px; height: 26px; border-radius: 8px; color: var(--muted); }
+.win button svg { width: 15px; height: 15px; }
+.win button:hover { background: var(--track); color: var(--text); }
+#close:hover { background: #c4433a; color: #fff; }
+#pin[aria-pressed="true"] { color: var(--accent); }
+
+/* --- dial --- */
+.dial {
+  position: relative;
+  width: 196px;
+  height: 196px;
+  margin: 14px auto 0;
+}
+.ring { width: 100%; height: 100%; transform: rotate(-90deg); }
+.ring circle { stroke-width: 6; fill: none; }
+.ring-track { stroke: var(--track); }
+.ring-progress {
+  stroke: var(--accent);
+  stroke-dasharray: 552.92;
+  stroke-dashoffset: 552.92;
+  transition: stroke-dashoffset 0.9s linear, stroke 0.6s ease;
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent) 55%, transparent));
+}
+.readout {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.mode {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--accent);
+}
+.time {
+  margin: 2px 0 8px;
+  font-size: 48px;
+  font-weight: 300;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+.dots { display: flex; gap: 6px; }
+.dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--track);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.dots i.on { background: var(--accent); box-shadow: none; }
+
+/* --- controls --- */
+.controls {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  margin-top: 14px;
+}
+.ghost { width: 38px; height: 38px; border-radius: 50%; color: var(--muted); }
+.ghost:hover { background: var(--track); color: var(--text); }
+.ghost svg { width: 18px; height: 18px; }
+.play {
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  color: var(--bg);
+  background: var(--accent);
+  box-shadow: 0 6px 22px color-mix(in srgb, var(--accent) 40%, transparent);
+  transition: transform 0.15s ease, background 0.6s ease;
+}
+.play:hover { transform: scale(1.05); }
+.play:active { transform: scale(0.96); }
+.play svg { width: 24px; height: 24px; stroke-width: 2.4; }
+.i-play { fill: currentColor; }
+.i-pause { display: none; }
+body[data-running="true"] .i-play { display: none; }
+body[data-running="true"] .i-pause { display: block; }
+
+/* --- treeline --- */
+.treeline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  height: 64px;
+  pointer-events: none;
+}
+.treeline path { stroke: none; }
+.treeline .far { fill: var(--far); }
+.treeline .near { fill: var(--near); }
