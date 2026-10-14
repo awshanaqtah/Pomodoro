@@ -50,9 +50,9 @@ a polished nature theme takes much more work); WPF or WinUI (needs the .NET runt
 |---|---|---|
 | 0 | Repo, Tauri scaffold, frameless widget window, Rust timer core | ✅ done |
 | 2 | **Sound engine**: synthesized rain, fire and thunder, a slider for each, fades, separate focus and break mixes, mute, chime, Windows notification, auto-rebuild on device change | ✅ done |
-| 1 | **Your timeline**: you set the focus, short break and long break lengths and the sessions per set; auto-start options | ⏳ next |
-| 3 | **Tasks, progress, rewards** (see below) | |
-| 4 | **Your own music**: pick a folder, shuffle or loop, play it over the ambience, optionally lower the ambience while a song plays | |
+| 1 | **Your timeline**: you set the focus, short break and long break lengths, sessions per set and a daily goal; auto-start options | ✅ done |
+| 3 | **Tasks, progress, rewards** (see below): tasks, Google Calendar import, Progress page and growing forest are done; streak unlocks are still to do | ✅ mostly |
+| 4 ⏳ next | **Your own music**: pick a folder, shuffle or loop, play it over the ambience, optionally lower the ambience while a song plays | |
 | 5 | Widget polish: tray menu, pin-to-desktop or always-on-top, start with Windows, custom icon | |
 | 6 | Lightness pass: measure RAM, destroy the webview on hide, release installer, GitHub release | |
 
@@ -67,6 +67,8 @@ a polished nature theme takes much more work); WPF or WinUI (needs the .NET runt
   plants a tree, and a full set grows a special glowing tree. Streaks unlock extras such as a night
   theme and new ambience layers (crickets, wind, ocean). Rewards are only ever gained; resetting a
   session takes nothing away.
+- **Calendar import.** Paste your calendar's private iCal link once; today's events become
+  tasks and resync every 15 minutes.
 - **Storage.** `tasks.json` and `history.json` (one row per finished session: date, minutes, task)
   next to `settings.json`.
 - **UI.** The widget gets three small pages, Timer, Tasks and Progress, so it stays compact.
