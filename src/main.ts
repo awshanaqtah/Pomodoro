@@ -405,7 +405,7 @@ function renderProgress(p: Progress) {
   $("bars").replaceChildren(
     ...p.week.map((d) => {
       const bar = document.createElement("div");
-      bar.className = `bar${d.minutes ? " on" : ""}${d.today ? " today" : ""}`;
+      bar.className = `day-bar${d.minutes ? " on" : ""}${d.today ? " today" : ""}`;
       bar.title = `${d.label}: ${duration(d.minutes)}`;
       const fill = document.createElement("i");
       fill.style.height = `${(d.minutes / most) * 100}%`;

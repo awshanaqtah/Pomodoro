@@ -1,6 +1,6 @@
 [package]
 name = "pomodoro"
-version = "0.1.0"
+version = "0.1.1"
 description = "A light nature-themed Pomodoro desktop widget"
 authors = ["Aws Hanaqtah"]
 edition = "2024"
