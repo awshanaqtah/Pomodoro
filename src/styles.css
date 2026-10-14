@@ -86,9 +86,9 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* --- dial --- */
 .dial {
   position: relative;
-  width: 196px;
-  height: 196px;
-  margin: 14px auto 0;
+  width: 176px;
+  height: 176px;
+  margin: 8px auto 0;
 }
 .ring { width: 100%; height: 100%; transform: rotate(-90deg); }
 .ring circle { stroke-width: 6; fill: none; }
@@ -117,7 +117,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 }
 .time {
   margin: 2px 0 8px;
-  font-size: 48px;
+  font-size: 44px;
   font-weight: 300;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
@@ -140,7 +140,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   align-items: center;
   justify-content: center;
   gap: 18px;
-  margin-top: 14px;
+  margin-top: 10px;
 }
 .ghost { width: 38px; height: 38px; border-radius: 50%; color: var(--muted); }
 .ghost:hover { background: var(--track); color: var(--text); }
@@ -162,6 +162,75 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 body[data-running="true"] .i-play { display: none; }
 body[data-running="true"] .i-pause { display: block; }
 
+#mute .i-muted { display: none; }
+#mute[aria-pressed="true"] { color: var(--accent); }
+#mute[aria-pressed="true"] .i-sound { display: none; }
+#mute[aria-pressed="true"] .i-muted { display: block; }
+
+/* --- mixer --- */
+.mixer {
+  position: relative;
+  z-index: 1;
+  margin: 16px 18px 0;
+  padding: 10px 12px 6px;
+  border-radius: 14px;
+  background: rgba(10, 18, 14, 0.45);
+  border: 1px solid var(--line);
+}
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+.tabs button {
+  flex: 1;
+  padding: 5px 0;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.tabs button:hover { color: var(--text); }
+.tabs button[aria-selected="true"] { background: var(--track); color: var(--text); }
+.layer {
+  display: grid;
+  grid-template-columns: 18px 56px 1fr;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.layer svg { width: 16px; height: 16px; color: var(--accent); }
+body[data-muted="true"] .layer { opacity: 0.45; }
+
+input[type="range"] {
+  --fill: 50%;
+  width: 100%;
+  height: 16px;
+  margin: 0;
+  background: none;
+  appearance: none;
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent) var(--fill), var(--track) var(--fill));
+}
+input[type="range"]::-webkit-slider-thumb {
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--text);
+  appearance: none;
+}
+input[type="range"]:focus-visible { outline: none; }
+input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 50%, transparent); }
+
 /* --- treeline --- */
 .treeline {
   position: absolute;
@@ -169,7 +238,7 @@ body[data-running="true"] .i-pause { display: block; }
   right: 0;
   bottom: 0;
   width: 100%;
-  height: 64px;
+  height: 52px;
   pointer-events: none;
 }
 .treeline path { stroke: none; }

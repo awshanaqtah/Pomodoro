@@ -16,6 +16,10 @@
           pomodoro
         </span>
         <div class="win">
+          <button id="mute" title="Mute ambience (M)" aria-pressed="false">
+            <svg class="i-sound" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4v-5Zm11.5-.5a4 4 0 0 1 0 6m2.5-8.5a7.5 7.5 0 0 1 0 11" /></svg>
+            <svg class="i-muted" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4v-5Zm11.5.5 5 5m0-5-5 5" /></svg>
+          </button>
           <button id="pin" title="Keep on top" aria-pressed="false">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6l-1 6 3 3H7l3-3-1-6Zm3 9v7" /></svg>
           </button>
@@ -52,6 +56,28 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 8 6-8 6V6Zm12 0v12" /></svg>
         </button>
       </nav>
+
+      <section class="mixer" aria-label="Ambience mix">
+        <div class="tabs" role="tablist">
+          <button role="tab" data-scope="focus" aria-selected="true">Focus mix</button>
+          <button role="tab" data-scope="break" aria-selected="false">Break mix</button>
+        </div>
+        <label class="layer">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5 5.5 8M13 4.5 11.5 8M19 4.5 17.5 8M10 11l-1.5 3.5M16 11l-1.5 3.5M7 17.5 5.5 21M13 17.5 11.5 21" /></svg>
+          <span>Rain</span>
+          <input type="range" min="0" max="100" data-layer="0" />
+        </label>
+        <label class="layer">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21c-3.9 0-6.5-2.6-6.5-6.2 0-3.4 2.6-5.3 3.6-8.8 2.2 1.5 3 3.4 3 5.2 1-.6 1.8-1.7 2-3 2 1.6 4.4 4 4.4 6.8 0 3.5-2.6 6-6.5 6Z" /></svg>
+          <span>Fire</span>
+          <input type="range" min="0" max="100" data-layer="1" />
+        </label>
+        <label class="layer">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.5 3 6 13.5h5.5L10 21l8-11h-5.5l1-7Z" /></svg>
+          <span>Thunder</span>
+          <input type="range" min="0" max="100" data-layer="2" />
+        </label>
+      </section>
 
       <svg class="treeline" viewBox="0 0 300 60" preserveAspectRatio="none" aria-hidden="true">
         <path class="far" d="M0 60V38l12-16 12 16 8-10 10 12 14-20 14 20 9-12 11 13 13-18 13 18 10-11 12 12 15-22 15 22 9-10 10 11 13-17 13 17 11-13 12 14 14-19 14 19 12-15 12 15 12-14 12 14V60Z" />

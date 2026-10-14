@@ -29,6 +29,7 @@ const pad = (n: number) => String(n).padStart(2, "0");
 function render(s: Snapshot) {
   document.body.dataset.mode = s.mode;
   document.body.dataset.running = String(s.running);
+  followMode(s.mode);
 
   const clock = `${pad(Math.floor(s.remaining / 60))}:${pad(s.remaining % 60)}`;
   timeEl.textContent = clock;
@@ -49,31 +50,72 @@ function render(s: Snapshot) {
   );
 }
 
-// Temporary end-of-phase chime. It moves to the Rust audio engine in Phase 2,
-// so it still plays when the webview is closed to save memory.
-let audio: AudioContext | undefined;
-function chime() {
-  if (!audio) return;
-  const now = audio.currentTime;
-  [523.25, 783.99].forEach((freq, i) => {
-    const osc = audio!.createOscillator();
-    const gain = audio!.createGain();
-    osc.type = "sine";
-    osc.frequency.value = freq;
-    gain.gain.setValueAtTime(0.0001, now + i * 0.18);
-    gain.gain.exponentialRampToValueAtTime(0.25, now + i * 0.18 + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + i * 0.18 + 1.6);
-    osc.connect(gain).connect(audio!.destination);
-    osc.start(now + i * 0.18);
-    osc.stop(now + i * 0.18 + 1.7);
-  });
+// --- ambience mixer ---
+
+type Scope = "focus" | "break";
+
+interface Sound {
+  focus_mix: number[];
+  break_mix: number[];
+  muted: boolean;
 }
 
+let sound: Sound = { focus_mix: [0, 0, 0], break_mix: [0, 0, 0], muted: false };
+let scope: Scope = "focus";
+let lastMode: Mode | undefined;
+const sliders = Array.from(document.querySelectorAll<HTMLInputElement>(".layer input"));
+const tabs = Array.from(document.querySelectorAll<HTMLButtonElement>(".tabs button"));
+const muteBtn = $("mute");
+
+const paintSlider = (el: HTMLInputElement) => el.style.setProperty("--fill", `${el.value}%`);
+
+function renderMixer() {
+  const mix = scope === "focus" ? sound.focus_mix : sound.break_mix;
+  sliders.forEach((el, i) => {
+    el.value = String(Math.round(mix[i] * 100));
+    paintSlider(el);
+  });
+  tabs.forEach((t) => t.setAttribute("aria-selected", String(t.dataset.scope === scope)));
+  muteBtn.setAttribute("aria-pressed", String(sound.muted));
+  document.body.dataset.muted = String(sound.muted);
+}
+
+// Follow the timer: show the mix that is about to play whenever the phase changes.
+function followMode(mode: Mode) {
+  if (mode === lastMode) return;
+  lastMode = mode;
+  scope = mode === "focus" ? "focus" : "break";
+  renderMixer();
+}
+
+function setLevel(el: HTMLInputElement, save: boolean) {
+  const layer = Number(el.dataset.layer);
+  const value = Number(el.value) / 100;
+  (scope === "focus" ? sound.focus_mix : sound.break_mix)[layer] = value;
+  paintSlider(el);
+  invoke("sound_set_level", { scope, layer, value, save });
+}
+
+function setMuted(muted: boolean) {
+  sound.muted = muted;
+  renderMixer();
+  invoke("sound_set_muted", { muted });
+}
+
+sliders.forEach((el) => {
+  el.addEventListener("input", () => setLevel(el, false));
+  el.addEventListener("change", () => setLevel(el, true));
+});
+tabs.forEach((t) =>
+  t.addEventListener("click", () => {
+    scope = t.dataset.scope as Scope;
+    renderMixer();
+  }),
+);
+muteBtn.addEventListener("click", () => setMuted(!sound.muted));
+
 const command = (name: string) => invoke<Snapshot>(name).then(render);
-const toggle = () => {
-  audio ??= new AudioContext();
-  command("timer_toggle");
-};
+const toggle = () => command("timer_toggle");
 
 $("toggle").addEventListener("click", toggle);
 $("reset").addEventListener("click", () => command("timer_reset"));
@@ -91,10 +133,14 @@ window.addEventListener("keydown", (e) => {
   if (e.code === "Space") toggle();
   else if (e.key === "r" || e.key === "R") command("timer_reset");
   else if (e.key === "s" || e.key === "S") command("timer_skip");
+  else if (e.key === "m" || e.key === "M") setMuted(!sound.muted);
   else return;
   e.preventDefault();
 });
 
 listen<Snapshot>("tick", (e) => render(e.payload));
-listen<Mode>("phase-done", chime);
 command("timer_state");
+invoke<Sound>("sound_state").then((s) => {
+  sound = s;
+  renderMixer();
+});
