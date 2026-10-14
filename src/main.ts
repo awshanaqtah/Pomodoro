@@ -69,6 +69,7 @@ interface Sound {
   break_mix: number[];
   muted: boolean;
   timeline: Timeline;
+  music: { follow: boolean; on_breaks: boolean };
 }
 
 let sound: Sound = {
@@ -76,6 +77,7 @@ let sound: Sound = {
   break_mix: [0, 0, 0],
   muted: false,
   timeline: { focus: 25, short: 5, long: 15, cycles: 4, auto_breaks: true, auto_focus: false, goal: 8 },
+  music: { follow: true, on_breaks: false },
 };
 let scope: Scope = "focus";
 let lastMode: Mode | undefined;
@@ -138,11 +140,14 @@ type FlagKey = "auto_breaks" | "auto_focus";
 const panel = $("settings");
 const gearBtn = $("gear");
 const numberInputs = Array.from(panel.querySelectorAll<HTMLInputElement>('input[type="number"]'));
-const flagInputs = Array.from(panel.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'));
+const flagInputs = Array.from(panel.querySelectorAll<HTMLInputElement>('input[type="checkbox"][data-key]'));
 
 function renderTimeline() {
   for (const el of numberInputs) el.value = String(sound.timeline[el.dataset.key as NumberKey]);
   for (const el of flagInputs) el.checked = sound.timeline[el.dataset.key as FlagKey];
+  followBox.checked = sound.music.follow;
+  breaksBox.checked = sound.music.on_breaks;
+  breaksBox.disabled = !sound.music.follow;
 }
 
 function setNumber(key: NumberKey, raw: number) {
@@ -461,6 +466,54 @@ function plantForest(sessions: number) {
 
 const loadProgress = () => invoke<Progress>("progress_get").then(renderProgress);
 
+// --- music (Spotify or whatever is playing, through Windows media controls) ---
+
+interface NowPlaying {
+  available: boolean;
+  spotify: boolean;
+  app: string;
+  title: string;
+  artist: string;
+  playing: boolean;
+  art: string | null;
+}
+
+const musicEl = $("music");
+const musicArt = $<HTMLImageElement>("music-art");
+const followBox = $<HTMLInputElement>("music-follow");
+const breaksBox = $<HTMLInputElement>("music-breaks");
+
+function renderMusic(n: NowPlaying) {
+  musicEl.classList.toggle("off", !n.available);
+  musicEl.classList.toggle("playing", n.playing);
+  musicEl.title = n.available ? "" : "Open Spotify";
+  musicArt.hidden = !n.art;
+  if (n.art) musicArt.src = n.art;
+  $("music-title").textContent = n.available ? n.title || n.app : "Spotify";
+  $("music-sub").textContent = n.available
+    ? [n.artist, n.spotify ? "" : n.app].filter(Boolean).join(" · ") || n.app
+    : "Open Spotify to play music here";
+}
+
+musicEl.addEventListener("click", () => {
+  if (musicEl.classList.contains("off")) invoke("music_open_spotify");
+});
+musicEl.querySelectorAll<HTMLButtonElement>(".music-btns button").forEach((b) =>
+  b.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (b.dataset.action === "toggle") musicEl.classList.toggle("playing"); // feels instant; Windows confirms within a second
+    invoke("music_control", { action: b.dataset.action });
+  }),
+);
+
+function saveMusicSettings() {
+  sound.music = { follow: followBox.checked, on_breaks: breaksBox.checked };
+  breaksBox.disabled = !sound.music.follow;
+  invoke("music_settings_set", { follow: sound.music.follow, onBreaks: sound.music.on_breaks });
+}
+followBox.addEventListener("change", saveMusicSettings);
+breaksBox.addEventListener("change", saveMusicSettings);
+
 const command = (name: string) => invoke<Snapshot>(name).then(render);
 const toggle = () => command("timer_toggle");
 
@@ -493,6 +546,8 @@ window.addEventListener("keydown", (e) => {
 listen<Snapshot>("tick", (e) => render(e.payload));
 listen("tasks-changed", () => taskCall("tasks_get", {}).then(loadProgress));
 listen<CalendarStatus>("calendar-status", (e) => renderCalendar(e.payload));
+listen<NowPlaying>("now-playing", (e) => renderMusic(e.payload));
+invoke<NowPlaying>("music_now").then(renderMusic);
 invoke<CalendarStatus>("calendar_status").then(renderCalendar);
 taskCall("tasks_get", {});
 command("timer_state");

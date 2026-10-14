@@ -1,10 +1,11 @@
 mod audio;
 mod calendar;
+mod music;
 mod tasks;
 
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Sender};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use audio::{Audio, LAYERS};
@@ -170,6 +171,22 @@ struct Settings {
     timeline: Timeline,
     /// Private iCal link. Stays on this PC.
     calendar_url: Option<String>,
+    music: MusicSettings,
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize)]
+#[serde(default)]
+struct MusicSettings {
+    /// Spotify plays while you focus and pauses when the timer stops.
+    follow: bool,
+    /// With `follow`, keep Spotify playing through breaks too.
+    on_breaks: bool,
+}
+
+impl Default for MusicSettings {
+    fn default() -> Self {
+        Self { follow: true, on_breaks: false }
+    }
 }
 
 impl Default for Settings {
@@ -180,6 +197,7 @@ impl Default for Settings {
             muted: false,
             timeline: Timeline::default(),
             calendar_url: None,
+            music: MusicSettings::default(),
         }
     }
 }
@@ -195,6 +213,8 @@ struct App {
     calendar: Mutex<CalendarStatus>,
     /// Wakes the calendar thread for an immediate sync.
     calendar_sync: Sender<()>,
+    music: Sender<music::Cmd>,
+    now_playing: Arc<Mutex<music::NowPlaying>>,
 }
 
 #[derive(Clone, Default, Serialize)]
@@ -248,7 +268,7 @@ impl App {
         tasks::save(&self.dir.join("history.json"), &*h);
     }
 
-    /// Runs a timer action, then brings the ambience in line with the new state.
+    /// Runs a timer action, then brings the ambience and music in line with the new state.
     fn with_timer(&self, f: impl FnOnce(&mut Timer)) -> Snapshot {
         let snap = {
             let mut t = self.timer.lock().unwrap();
@@ -256,7 +276,27 @@ impl App {
             t.snapshot()
         };
         self.sync_audio();
+        self.sync_music();
         snap
+    }
+
+    /// Lets Spotify follow the timer, if that's switched on. Called only when the timer
+    /// changes state, so you can still override the music by hand mid-session.
+    fn sync_music(&self) {
+        let m = self.settings.lock().unwrap().music;
+        if !m.follow {
+            return;
+        }
+        let (mode, running) = {
+            let t = self.timer.lock().unwrap();
+            (t.mode, t.running)
+        };
+        let play = running && (mode == Mode::Focus || m.on_breaks);
+        self.music_cmd(music::Cmd::Follow { play });
+    }
+
+    fn music_cmd(&self, cmd: music::Cmd) {
+        let _ = self.music.send(cmd);
     }
 }
 
@@ -349,6 +389,7 @@ fn spawn_ticker(app: AppHandle) {
                 (t.snapshot(), finished)
             };
             if let Some((ended, next)) = finished {
+                state.sync_music();
                 if ended == Mode::Focus {
                     let minutes = state.timer.lock().unwrap().tl.focus;
                     state.record_focus(minutes);
@@ -459,6 +500,34 @@ fn calendar_refresh(app: State<'_, App>) {
 }
 
 #[tauri::command]
+fn music_now(app: State<'_, App>) -> music::NowPlaying {
+    app.now_playing.lock().unwrap().clone()
+}
+
+#[tauri::command]
+fn music_control(app: State<'_, App>, action: String) {
+    let cmd = match action.as_str() {
+        "next" => music::Cmd::Next,
+        "previous" => music::Cmd::Previous,
+        _ => music::Cmd::Toggle,
+    };
+    app.music_cmd(cmd);
+}
+
+#[tauri::command]
+fn music_settings_set(app: State<'_, App>, follow: bool, on_breaks: bool) {
+    app.settings.lock().unwrap().music = MusicSettings { follow, on_breaks };
+    app.save_settings();
+    app.sync_music();
+}
+
+/// Opens (or focuses) the Spotify app through its URL scheme.
+#[tauri::command]
+fn music_open_spotify() {
+    let _ = std::process::Command::new("explorer.exe").arg("spotify:").spawn();
+}
+
+#[tauri::command]
 fn sound_state(app: State<'_, App>) -> Settings {
     app.settings.lock().unwrap().clone()
 }
@@ -494,6 +563,8 @@ pub fn run() {
             let dir = app.path().app_config_dir()?;
             let settings: Settings = tasks::load(&dir.join("settings.json"));
             let (calendar_sync, calendar_wake) = mpsc::channel();
+            let (music_tx, music_rx) = mpsc::channel();
+            let now_playing = Arc::new(Mutex::new(music::NowPlaying::default()));
             let _ = calendar_sync.send(()); // first sync as soon as the thread starts
             app.manage(App {
                 timer: Mutex::new(Timer::new(settings.timeline.clamped())),
@@ -504,7 +575,10 @@ pub fn run() {
                 audio: Audio::start(),
                 calendar: Mutex::new(CalendarStatus::default()),
                 calendar_sync,
+                music: music_tx,
+                now_playing: now_playing.clone(),
             });
+            music::spawn(app.handle().clone(), music_rx, now_playing);
             spawn_ticker(app.handle().clone());
             spawn_calendar(app.handle().clone(), calendar_wake);
             Ok(())
@@ -521,6 +595,10 @@ pub fn run() {
             task_remove,
             task_set_active,
             progress_get,
+            music_now,
+            music_control,
+            music_settings_set,
+            music_open_spotify,
             calendar_status,
             calendar_set_url,
             calendar_refresh,

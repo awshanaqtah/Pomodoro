@@ -159,8 +159,8 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .play svg { width: 24px; height: 24px; stroke-width: 2.4; }
 .i-play { fill: currentColor; }
 .i-pause { display: none; }
-body[data-running="true"] .i-play { display: none; }
-body[data-running="true"] .i-pause { display: block; }
+body[data-running="true"] .play .i-play { display: none; }
+body[data-running="true"] .play .i-pause { display: block; }
 
 #mute .i-muted { display: none; }
 #mute[aria-pressed="true"] { color: var(--accent); }
@@ -532,3 +532,41 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px 
 .bar span { font-size: 9.5px; color: var(--muted); }
 .bar.today span { color: var(--text); }
 .forest-note { margin: 0; font-size: 11px; text-align: center; color: var(--muted); }
+
+/* --- music --- */
+.music {
+  display: grid;
+  grid-template-columns: 34px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  margin: 6px -4px 0;
+  padding: 7px 4px 3px;
+  border-top: 1px solid var(--line);
+}
+.art {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  overflow: hidden;
+  border-radius: 7px;
+  color: var(--accent);
+  background: var(--track);
+}
+.art svg { width: 16px; height: 16px; }
+.art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.music-text { min-width: 0; display: flex; flex-direction: column; }
+.music-title, .music-sub { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.music-title { font-size: 12px; }
+.music-sub { font-size: 10.5px; color: var(--muted); }
+.music-btns { display: flex; }
+.music-btns button { width: 26px; height: 26px; border-radius: 7px; color: var(--muted); }
+.music-btns button:hover { color: var(--text); background: var(--track); }
+.music-btns svg { width: 14px; height: 14px; }
+.music.playing .music-btns .i-play { display: none; }
+.music.playing .music-btns .i-pause { display: block; }
+.music.off { cursor: pointer; }
+.music.off .music-btns { display: none; }
+.music.off:hover .music-title { color: var(--accent); }
+.panel h2.sub { margin-top: 8px; }

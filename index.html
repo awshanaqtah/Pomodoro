@@ -89,6 +89,28 @@
           <span>Thunder</span>
           <input type="range" min="0" max="100" data-layer="2" />
         </label>
+        <div class="music off" id="music" title="Open Spotify">
+          <div class="art">
+            <img id="music-art" alt="" hidden />
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18V5.5l11-2V16M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm11-2a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" /></svg>
+          </div>
+          <div class="music-text">
+            <span class="music-title" id="music-title">Spotify</span>
+            <span class="music-sub" id="music-sub">Open Spotify to play music here</span>
+          </div>
+          <div class="music-btns">
+            <button data-action="previous" title="Previous track">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6v12l-8.5-6L18 6ZM6 6v12" /></svg>
+            </button>
+            <button data-action="toggle" title="Play / pause">
+              <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5L8 5.5Z" /></svg>
+              <svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14" /></svg>
+            </button>
+            <button data-action="next" title="Next track">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 8.5 6L6 18V6Zm12 0v12" /></svg>
+            </button>
+          </div>
+        </div>
       </section>
       </div>
 
@@ -183,6 +205,9 @@
         </div>
         <label class="switch"><input type="checkbox" data-key="auto_breaks" /> <span>Start breaks automatically</span></label>
         <label class="switch"><input type="checkbox" data-key="auto_focus" /> <span>Start focus automatically</span></label>
+        <h2 class="sub">Music</h2>
+        <label class="switch"><input type="checkbox" id="music-follow" /> <span>Spotify plays while you focus</span></label>
+        <label class="switch"><input type="checkbox" id="music-breaks" /> <span>Keep it playing on breaks</span></label>
         <p class="hint">Changes to a phase that's already running apply from the next phase.</p>
         <button class="done" id="settings-done">Done</button>
       </section>

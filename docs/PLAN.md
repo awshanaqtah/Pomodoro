@@ -16,7 +16,9 @@ A Pomodoro timer that lives on the desktop as a small widget. Three things matte
 |---|---|---|
 | Shell | **Tauri v2** | Uses Windows' built-in WebView2 instead of bundling Chromium. Installer is about 5 MB; Electron would be 80+ MB and use 150–300 MB of RAM. |
 | Core | **Rust** | The timer and audio live here, so they keep running when the window is hidden. |
-| Audio | **rodio** (Rust) | Mixes several looping streams with per-layer volume. Decodes OGG, MP3, FLAC and WAV, so your own songs work too. |
+| Audio | **cpal** (Rust) | One mixer callback; rain, fire and thunder are synthesized live, so there are no audio files to ship. |
+| Music | **Windows media controls** (`windows` crate) | Shows and controls Spotify (or any player) with no login and no API keys. |
+| Calendar | **ureq** + **rrule** | Reads a private iCal link and expands repeating events. |
 | UI | **Vanilla TypeScript + CSS**, built with Vite | No framework runtime. The UI only draws state that Rust sends it. |
 | Settings | JSON file in `%APPDATA%` | No accounts, no cloud. |
 
@@ -52,8 +54,8 @@ a polished nature theme takes much more work); WPF or WinUI (needs the .NET runt
 | 2 | **Sound engine**: synthesized rain, fire and thunder, a slider for each, fades, separate focus and break mixes, mute, chime, Windows notification, auto-rebuild on device change | ✅ done |
 | 1 | **Your timeline**: you set the focus, short break and long break lengths, sessions per set and a daily goal; auto-start options | ✅ done |
 | 3 | **Tasks, progress, rewards** (see below): tasks, Google Calendar import, Progress page and growing forest are done; streak unlocks are still to do | ✅ mostly |
-| 4 ⏳ next | **Your own music**: pick a folder, shuffle or loop, play it over the ambience, optionally lower the ambience while a song plays | |
-| 5 | Widget polish: tray menu, pin-to-desktop or always-on-top, start with Windows, custom icon | |
+| 4 | **Spotify**: now-playing card with album art and ⏮ ⏯ ⏭ through Windows media controls (no login, works with Spotify Free); Spotify plays while you focus and pauses on breaks or pause, optionally keeps playing on breaks | ✅ done |
+| 5 ⏳ next | Widget polish: tray menu, pin-to-desktop or always-on-top, start with Windows, custom icon | |
 | 6 | Lightness pass: measure RAM, destroy the webview on hide, release installer, GitHub release | |
 
 ### Phase 3: tasks, progress, rewards
