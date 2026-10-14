@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1f3428" />
+      <stop offset="1" stop-color="#0e1813" />
+    </linearGradient>
+    <linearGradient id="ember" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffb066" />
+      <stop offset="1" stop-color="#e8692a" />
+    </linearGradient>
+  </defs>
+  <rect x="32" y="32" width="960" height="960" rx="220" fill="url(#bg)" />
+  <!-- timer ring: dim track, ember progress -->
+  <circle cx="512" cy="512" r="330" fill="none" stroke="#e6eee3" stroke-opacity="0.1" stroke-width="56" />
+  <circle cx="512" cy="512" r="330" fill="none" stroke="url(#ember)" stroke-width="56" stroke-linecap="round"
+    stroke-dasharray="1555 2074" transform="rotate(-90 512 512)" />
+  <!-- pine -->
+  <path fill="#8fcf8a" d="M512 300 L612 450 H568 L652 570 H596 L690 700 H334 L428 570 H372 L456 450 H412 Z" />
+  <rect x="490" y="700" width="44" height="64" rx="8" fill="#8fcf8a" />
+</svg>
