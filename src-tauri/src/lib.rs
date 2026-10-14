@@ -31,11 +31,13 @@ struct Timeline {
     cycles: u32,
     auto_breaks: bool,
     auto_focus: bool,
+    /// Focus sessions per day you're aiming for.
+    goal: u32,
 }
 
 impl Default for Timeline {
     fn default() -> Self {
-        Self { focus: 25, short: 5, long: 15, cycles: 4, auto_breaks: true, auto_focus: false }
+        Self { focus: 25, short: 5, long: 15, cycles: 4, auto_breaks: true, auto_focus: false, goal: 8 }
     }
 }
 
@@ -46,6 +48,7 @@ impl Timeline {
             short: self.short.clamp(1, 60),
             long: self.long.clamp(1, 90),
             cycles: self.cycles.clamp(1, 12),
+            goal: self.goal.clamp(1, 24),
             ..self
         }
     }
@@ -432,6 +435,11 @@ fn task_set_active(app: State<'_, App>, id: Option<String>) -> Tasks {
 }
 
 #[tauri::command]
+fn progress_get(app: State<'_, App>) -> tasks::Progress {
+    app.history.lock().unwrap().progress()
+}
+
+#[tauri::command]
 fn calendar_status(app: State<'_, App>) -> CalendarStatus {
     app.calendar.lock().unwrap().clone()
 }
@@ -512,6 +520,7 @@ pub fn run() {
             task_update,
             task_remove,
             task_set_active,
+            progress_get,
             calendar_status,
             calendar_set_url,
             calendar_refresh,

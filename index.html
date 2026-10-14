@@ -38,6 +38,7 @@
       <nav class="pages" role="tablist">
         <button role="tab" data-page="timer" aria-selected="true">Timer</button>
         <button role="tab" data-page="tasks" aria-selected="false">Tasks <span class="count" id="task-count"></span></button>
+        <button role="tab" data-page="progress" aria-selected="false">Progress</button>
       </nav>
 
       <div class="page" data-page="timer">
@@ -125,6 +126,24 @@
         </form>
       </div>
 
+      <div class="page progress" data-page="progress" hidden>
+        <div class="goal">
+          <svg class="goal-ring" viewBox="0 0 120 120" aria-hidden="true">
+            <circle class="ring-track" cx="60" cy="60" r="52" />
+            <circle class="goal-progress" id="goal-ring" cx="60" cy="60" r="52" />
+          </svg>
+          <div class="goal-text"><strong id="goal-count">0</strong><span id="goal-of">of 8 sessions</span></div>
+        </div>
+        <p class="focused" id="focused">Nothing yet today</p>
+        <div class="stats">
+          <div><strong id="streak">0</strong><span>day streak</span></div>
+          <div><strong id="best">0</strong><span>best streak</span></div>
+          <div><strong id="week-total">0m</strong><span>this week</span></div>
+        </div>
+        <div class="bars" id="bars" aria-label="Focus minutes, last 7 days"></div>
+        <p class="forest-note" id="forest-note">Every focus session plants a tree in your forest below.</p>
+      </div>
+
       <section class="panel" id="settings" hidden>
         <h2>Your timeline</h2>
         <div class="step">
@@ -155,15 +174,23 @@
           <button data-key="cycles" data-delta="1" aria-label="More sessions per set">+</button>
           <small></small>
         </div>
+        <div class="step">
+          <span>Daily goal</span>
+          <button data-key="goal" data-delta="-1" aria-label="Lower daily goal">−</button>
+          <input type="number" data-key="goal" min="1" max="24" aria-label="Daily goal" />
+          <button data-key="goal" data-delta="1" aria-label="Raise daily goal">+</button>
+          <small>sess.</small>
+        </div>
         <label class="switch"><input type="checkbox" data-key="auto_breaks" /> <span>Start breaks automatically</span></label>
         <label class="switch"><input type="checkbox" data-key="auto_focus" /> <span>Start focus automatically</span></label>
         <p class="hint">Changes to a phase that's already running apply from the next phase.</p>
         <button class="done" id="settings-done">Done</button>
       </section>
 
-      <svg class="treeline" viewBox="0 0 300 60" preserveAspectRatio="none" aria-hidden="true">
+      <svg class="treeline" viewBox="0 0 300 60" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
         <path class="far" d="M0 60V38l12-16 12 16 8-10 10 12 14-20 14 20 9-12 11 13 13-18 13 18 10-11 12 12 15-22 15 22 9-10 10 11 13-17 13 17 11-13 12 14 14-19 14 19 12-15 12 15 12-14 12 14V60Z" />
-        <path class="near" d="M0 60V48l8-10 8 10 6-6 7 8 10-14 10 14 7-8 8 9 11-13 11 13 6-7 8 8 12-16 12 16 7-8 8 9 10-12 10 12 9-11 9 11 12-15 12 15 8-9 8 9 11-14 11 14 9-10 9 10 12-15 12 15V60Z" />
+        <g id="forest"></g>
+        <path class="ground" d="M0 60V55q80-4 150-1t150-1V60Z" />
       </svg>
     </main>
   </body>

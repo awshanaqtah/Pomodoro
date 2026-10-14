@@ -61,6 +61,7 @@ interface Timeline {
   cycles: number;
   auto_breaks: boolean;
   auto_focus: boolean;
+  goal: number;
 }
 
 interface Sound {
@@ -74,7 +75,7 @@ let sound: Sound = {
   focus_mix: [0, 0, 0],
   break_mix: [0, 0, 0],
   muted: false,
-  timeline: { focus: 25, short: 5, long: 15, cycles: 4, auto_breaks: true, auto_focus: false },
+  timeline: { focus: 25, short: 5, long: 15, cycles: 4, auto_breaks: true, auto_focus: false, goal: 8 },
 };
 let scope: Scope = "focus";
 let lastMode: Mode | undefined;
@@ -131,7 +132,7 @@ muteBtn.addEventListener("click", () => setMuted(!sound.muted));
 
 // --- your timeline ---
 
-type NumberKey = "focus" | "short" | "long" | "cycles";
+type NumberKey = "focus" | "short" | "long" | "cycles" | "goal";
 type FlagKey = "auto_breaks" | "auto_focus";
 
 const panel = $("settings");
@@ -154,6 +155,7 @@ function setNumber(key: NumberKey, raw: number) {
 function saveTimeline() {
   renderTimeline();
   invoke<Snapshot>("timeline_set", { timeline: sound.timeline }).then(render);
+  loadProgress();
 }
 
 function showSettings(open: boolean) {
@@ -365,6 +367,100 @@ $("cal-remove").addEventListener("click", () => {
   showCalForm(false);
 });
 
+// --- progress and the forest ---
+
+interface Progress {
+  today_sessions: number;
+  today_minutes: number;
+  streak: number;
+  best_streak: number;
+  week: { label: string; minutes: number; today: boolean }[];
+}
+
+const GOAL_CIRCUMFERENCE = 2 * Math.PI * 52;
+const FOREST_SLOTS = 24;
+const forestEl = $("forest");
+let plantedToday = -1; // trees already drawn, so only new ones animate in
+
+const duration = (min: number) => (min < 60 ? `${min}m` : `${Math.floor(min / 60)}h${min % 60 ? ` ${min % 60}m` : ""}`);
+
+function renderProgress(p: Progress) {
+  const goal = sound.timeline.goal;
+  $("goal-count").textContent = String(p.today_sessions);
+  $("goal-of").textContent = `of ${goal} session${goal === 1 ? "" : "s"}`;
+  $("goal-ring").style.strokeDashoffset = String(GOAL_CIRCUMFERENCE * (1 - Math.min(1, p.today_sessions / goal)));
+  $("focused").textContent = p.today_minutes
+    ? `${duration(p.today_minutes)} focused today${p.today_sessions >= goal ? " · goal reached 🌲" : ""}`
+    : "Nothing yet today";
+  $("streak").textContent = String(p.streak);
+  $("best").textContent = String(p.best_streak);
+  $("week-total").textContent = duration(p.week.reduce((sum, d) => sum + d.minutes, 0));
+
+  const most = Math.max(60, ...p.week.map((d) => d.minutes));
+  $("bars").replaceChildren(
+    ...p.week.map((d) => {
+      const bar = document.createElement("div");
+      bar.className = `bar${d.minutes ? " on" : ""}${d.today ? " today" : ""}`;
+      bar.title = `${d.label}: ${duration(d.minutes)}`;
+      const fill = document.createElement("i");
+      fill.style.height = `${(d.minutes / most) * 100}%`;
+      const label = document.createElement("span");
+      label.textContent = d.label.slice(0, 2);
+      bar.append(fill, label);
+      return bar;
+    }),
+  );
+  $("forest-note").textContent =
+    p.today_sessions >= FOREST_SLOTS
+      ? "Your forest is full today. What a day."
+      : "Every focus session plants a tree in your forest below.";
+  plantForest(p.today_sessions);
+}
+
+// Tree layout is fixed per day (seeded by the date), so earlier trees never move.
+function forestLayout(day: string) {
+  let seed = [...day].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+  const rand = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32;
+  const slots = Array.from({ length: FOREST_SLOTS }, (_, i) => i);
+  for (let i = slots.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [slots[i], slots[j]] = [slots[j], slots[i]];
+  }
+  return slots.map((slot) => ({ x: 7 + slot * 12.1 + (rand() - 0.5) * 6, h: 20 + rand() * 22 }));
+}
+
+function pine(x: number, h: number) {
+  const base = 56;
+  const w = h * 0.5;
+  const tier = (bottom: number, top: number, half: number) =>
+    `M${(x - half).toFixed(1)} ${bottom.toFixed(1)}L${x.toFixed(1)} ${top.toFixed(1)}L${(x + half).toFixed(1)} ${bottom.toFixed(1)}Z`;
+  return (
+    tier(base, base - h * 0.62, w * 0.5) + tier(base - h * 0.3, base - h * 0.86, w * 0.38) + tier(base - h * 0.56, base - h, w * 0.26)
+  );
+}
+
+function plantForest(sessions: number) {
+  const count = Math.min(sessions, FOREST_SLOTS);
+  if (count === plantedToday) return;
+  const layout = forestLayout(new Date().toLocaleDateString("en-CA")); // YYYY-MM-DD, local
+  const cycles = sound.timeline.cycles;
+  const trees = layout.slice(0, count).map((t, i) => ({ ...t, i }));
+  // Taller trees behind shorter ones.
+  trees.sort((a, b) => b.h - a.h);
+  forestEl.replaceChildren(
+    ...trees.map(({ x, h, i }) => {
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", pine(x, h));
+      const glow = (i + 1) % cycles === 0; // every full set grows a glowing tree
+      path.setAttribute("class", `tree${glow ? " glow" : ""}${plantedToday >= 0 && i >= plantedToday ? " grow" : ""}`);
+      return path;
+    }),
+  );
+  plantedToday = count;
+}
+
+const loadProgress = () => invoke<Progress>("progress_get").then(renderProgress);
+
 const command = (name: string) => invoke<Snapshot>(name).then(render);
 const toggle = () => command("timer_toggle");
 
@@ -395,7 +491,7 @@ window.addEventListener("keydown", (e) => {
 });
 
 listen<Snapshot>("tick", (e) => render(e.payload));
-listen("tasks-changed", () => taskCall("tasks_get", {}));
+listen("tasks-changed", () => taskCall("tasks_get", {}).then(loadProgress));
 listen<CalendarStatus>("calendar-status", (e) => renderCalendar(e.payload));
 invoke<CalendarStatus>("calendar_status").then(renderCalendar);
 taskCall("tasks_get", {});
@@ -403,4 +499,5 @@ command("timer_state");
 invoke<Sound>("sound_state").then((s) => {
   sound = s;
   renderMixer();
+  loadProgress();
 });
