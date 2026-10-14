@@ -49,11 +49,27 @@ a polished nature theme takes much more work); WPF or WinUI (needs the .NET runt
 | Phase | What ships | Status |
 |---|---|---|
 | 0 | Repo, Tauri scaffold, frameless widget window, Rust timer core | ✅ done |
-| 1 | Timer polish: Windows notification at end of phase, chime from Rust, editable durations, auto-start options | ⏳ |
-| 2 | **Sound engine**: rain, fire and thunder layers, a slider for each, fade in and out, a separate mix for focus and for breaks, master mute | |
-| 3 | **Your own music**: pick a folder, shuffle or loop, play it over the ambience, optionally lower the ambience while a song plays | |
-| 4 | Widget polish: tray menu, pin-to-desktop or always-on-top, start with Windows, settings saved, custom icon | |
-| 5 | Lightness pass: measure RAM idle and playing, destroy the webview on hide, release installer, GitHub release | |
+| 2 | **Sound engine**: synthesized rain, fire and thunder, a slider for each, fades, separate focus and break mixes, mute, chime, Windows notification, auto-rebuild on device change | ✅ done |
+| 1 | **Your timeline**: you set the focus, short break and long break lengths and the sessions per set; auto-start options | ⏳ next |
+| 3 | **Tasks, progress, rewards** (see below) | |
+| 4 | **Your own music**: pick a folder, shuffle or loop, play it over the ambience, optionally lower the ambience while a song plays | |
+| 5 | Widget polish: tray menu, pin-to-desktop or always-on-top, start with Windows, custom icon | |
+| 6 | Lightness pass: measure RAM, destroy the webview on hide, release installer, GitHub release | |
+
+### Phase 3: tasks, progress, rewards
+
+- **Tasks.** A small checklist in the widget. Tasks are either *daily* (they reset each morning, for
+  things done every day) or *one-off*. You pick the active task, and each finished focus session
+  counts toward it (for example 2 of 3 sessions).
+- **Progress.** Today's focus minutes against a daily goal (a ring), your streak in days, and a
+  7-day bar chart.
+- **Rewards: your forest grows.** The treeline at the bottom is your day. Each finished focus session
+  plants a tree, and a full set grows a special glowing tree. Streaks unlock extras such as a night
+  theme and new ambience layers (crickets, wind, ocean). Rewards are only ever gained; resetting a
+  session takes nothing away.
+- **Storage.** `tasks.json` and `history.json` (one row per finished session: date, minutes, task)
+  next to `settings.json`.
+- **UI.** The widget gets three small pages, Timer, Tasks and Progress, so it stays compact.
 
 ## Sounds — sourcing
 

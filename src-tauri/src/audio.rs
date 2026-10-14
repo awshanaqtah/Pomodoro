@@ -12,6 +12,10 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 pub const LAYERS: usize = 3; // rain, fire, thunder
 
+/// Per-layer trim so every slider at 100% sits around -18 dBFS RMS: ambience, not foreground.
+/// Measured with the `layer_levels` test.
+const TRIM: [f32; LAYERS] = [0.5, 0.5, 0.75];
+
 /// Lock-free state shared between the app and the audio callback.
 struct Shared {
     targets: [AtomicU32; LAYERS], // f32 bits, 0.0..=1.0
@@ -181,8 +185,9 @@ impl Mixer {
                     1 => self.fire.next(),
                     _ => self.thunder.next(),
                 };
-                l += a * *g;
-                r += b * *g;
+                let g = *g * TRIM[i];
+                l += a * g;
+                r += b * g;
             }
             let c = self.chime.next();
             let (l, r) = (soft_clip(l + c), soft_clip(r + c));
@@ -594,10 +599,11 @@ mod tests {
         thunder.until_next = 1;
         let seconds = 10;
         let n = sr as usize * seconds;
-        let mut stats = |name: &str, f: &mut dyn FnMut() -> (f32, f32)| {
+        let stats = |name: &str, trim: f32, f: &mut dyn FnMut() -> (f32, f32)| {
             let (mut sum, mut peak) = (0.0f64, 0.0f32);
             for _ in 0..n {
                 let (l, r) = f();
+                let (l, r) = (l * trim, r * trim);
                 sum += (l * l + r * r) as f64 * 0.5;
                 peak = peak.max(l.abs()).max(r.abs());
             }
@@ -605,8 +611,8 @@ mod tests {
             println!("{name:8} rms {rms:.3}  peak {peak:.3}");
             assert!(rms > 0.01 && peak < 3.0, "{name} level out of range");
         };
-        stats("rain", &mut || rain.next());
-        stats("fire", &mut || fire.next());
-        stats("thunder", &mut || thunder.next());
+        stats("rain", TRIM[0], &mut || rain.next());
+        stats("fire", TRIM[1], &mut || fire.next());
+        stats("thunder", TRIM[2], &mut || thunder.next());
     }
 }

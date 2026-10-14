@@ -54,13 +54,28 @@ function render(s: Snapshot) {
 
 type Scope = "focus" | "break";
 
+interface Timeline {
+  focus: number;
+  short: number;
+  long: number;
+  cycles: number;
+  auto_breaks: boolean;
+  auto_focus: boolean;
+}
+
 interface Sound {
   focus_mix: number[];
   break_mix: number[];
   muted: boolean;
+  timeline: Timeline;
 }
 
-let sound: Sound = { focus_mix: [0, 0, 0], break_mix: [0, 0, 0], muted: false };
+let sound: Sound = {
+  focus_mix: [0, 0, 0],
+  break_mix: [0, 0, 0],
+  muted: false,
+  timeline: { focus: 25, short: 5, long: 15, cycles: 4, auto_breaks: true, auto_focus: false },
+};
 let scope: Scope = "focus";
 let lastMode: Mode | undefined;
 const sliders = Array.from(document.querySelectorAll<HTMLInputElement>(".layer input"));
@@ -114,6 +129,55 @@ tabs.forEach((t) =>
 );
 muteBtn.addEventListener("click", () => setMuted(!sound.muted));
 
+// --- your timeline ---
+
+type NumberKey = "focus" | "short" | "long" | "cycles";
+type FlagKey = "auto_breaks" | "auto_focus";
+
+const panel = $("settings");
+const gearBtn = $("gear");
+const numberInputs = Array.from(panel.querySelectorAll<HTMLInputElement>('input[type="number"]'));
+const flagInputs = Array.from(panel.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'));
+
+function renderTimeline() {
+  for (const el of numberInputs) el.value = String(sound.timeline[el.dataset.key as NumberKey]);
+  for (const el of flagInputs) el.checked = sound.timeline[el.dataset.key as FlagKey];
+}
+
+function setNumber(key: NumberKey, raw: number) {
+  const el = numberInputs.find((i) => i.dataset.key === key)!;
+  const value = Math.min(Number(el.max), Math.max(Number(el.min), Math.round(raw) || Number(el.min)));
+  sound.timeline[key] = value;
+  saveTimeline();
+}
+
+function saveTimeline() {
+  renderTimeline();
+  invoke<Snapshot>("timeline_set", { timeline: sound.timeline }).then(render);
+}
+
+function showSettings(open: boolean) {
+  panel.hidden = !open;
+  gearBtn.setAttribute("aria-expanded", String(open));
+  if (open) renderTimeline();
+}
+
+panel.querySelectorAll<HTMLButtonElement>(".step button").forEach((b) =>
+  b.addEventListener("click", () => {
+    const key = b.dataset.key as NumberKey;
+    setNumber(key, sound.timeline[key] + Number(b.dataset.delta));
+  }),
+);
+numberInputs.forEach((el) => el.addEventListener("change", () => setNumber(el.dataset.key as NumberKey, Number(el.value))));
+flagInputs.forEach((el) =>
+  el.addEventListener("change", () => {
+    sound.timeline[el.dataset.key as FlagKey] = el.checked;
+    saveTimeline();
+  }),
+);
+gearBtn.addEventListener("click", () => showSettings(gearBtn.getAttribute("aria-expanded") !== "true"));
+$("settings-done").addEventListener("click", () => showSettings(false));
+
 const command = (name: string) => invoke<Snapshot>(name).then(render);
 const toggle = () => command("timer_toggle");
 
@@ -130,6 +194,10 @@ pinBtn.addEventListener("click", async () => {
 
 window.addEventListener("keydown", (e) => {
   if (e.repeat) return;
+  if (!panel.hidden) {
+    if (e.key === "Escape") showSettings(false);
+    return; // typing in the settings shouldn't drive the timer
+  }
   if (e.code === "Space") toggle();
   else if (e.key === "r" || e.key === "R") command("timer_reset");
   else if (e.key === "s" || e.key === "S") command("timer_skip");

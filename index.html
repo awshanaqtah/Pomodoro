@@ -20,6 +20,9 @@
             <svg class="i-sound" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4v-5Zm11.5-.5a4 4 0 0 1 0 6m2.5-8.5a7.5 7.5 0 0 1 0 11" /></svg>
             <svg class="i-muted" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4v-5Zm11.5.5 5 5m0-5-5 5" /></svg>
           </button>
+          <button id="gear" title="Your timeline" aria-expanded="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10m4 0h2M4 17h2m4 0h10" /><circle cx="16" cy="7" r="2" /><circle cx="8" cy="17" r="2" /></svg>
+          </button>
           <button id="pin" title="Keep on top" aria-pressed="false">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6l-1 6 3 3H7l3-3-1-6Zm3 9v7" /></svg>
           </button>
@@ -77,6 +80,42 @@
           <span>Thunder</span>
           <input type="range" min="0" max="100" data-layer="2" />
         </label>
+      </section>
+
+      <section class="panel" id="settings" hidden>
+        <h2>Your timeline</h2>
+        <div class="step">
+          <span>Focus</span>
+          <button data-key="focus" data-delta="-5" aria-label="Less focus">−</button>
+          <input type="number" data-key="focus" min="1" max="180" aria-label="Focus" />
+          <button data-key="focus" data-delta="5" aria-label="More focus">+</button>
+          <small>min</small>
+        </div>
+        <div class="step">
+          <span>Short break</span>
+          <button data-key="short" data-delta="-1" aria-label="Less short break">−</button>
+          <input type="number" data-key="short" min="1" max="60" aria-label="Short break" />
+          <button data-key="short" data-delta="1" aria-label="More short break">+</button>
+          <small>min</small>
+        </div>
+        <div class="step">
+          <span>Long break</span>
+          <button data-key="long" data-delta="-5" aria-label="Less long break">−</button>
+          <input type="number" data-key="long" min="1" max="90" aria-label="Long break" />
+          <button data-key="long" data-delta="5" aria-label="More long break">+</button>
+          <small>min</small>
+        </div>
+        <div class="step">
+          <span>Sessions per set</span>
+          <button data-key="cycles" data-delta="-1" aria-label="Less sessions per set">−</button>
+          <input type="number" data-key="cycles" min="1" max="12" aria-label="Sessions per set" />
+          <button data-key="cycles" data-delta="1" aria-label="More sessions per set">+</button>
+          <small></small>
+        </div>
+        <label class="switch"><input type="checkbox" data-key="auto_breaks" /> <span>Start breaks automatically</span></label>
+        <label class="switch"><input type="checkbox" data-key="auto_focus" /> <span>Start focus automatically</span></label>
+        <p class="hint">Changes to a phase that's already running apply from the next phase.</p>
+        <button class="done" id="settings-done">Done</button>
       </section>
 
       <svg class="treeline" viewBox="0 0 300 60" preserveAspectRatio="none" aria-hidden="true">

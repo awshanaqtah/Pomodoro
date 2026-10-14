@@ -17,12 +17,34 @@ enum Mode {
     Long,
 }
 
-/// Phase lengths in seconds. Becomes user-editable once settings land (Phase 4).
-struct Durations {
-    focus: u64,
-    short: u64,
-    long: u64,
-    cycles_per_long: u32,
+/// Your timeline: phase lengths in minutes and how phases hand over to each other.
+#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+struct Timeline {
+    focus: u32,
+    short: u32,
+    long: u32,
+    cycles: u32,
+    auto_breaks: bool,
+    auto_focus: bool,
+}
+
+impl Default for Timeline {
+    fn default() -> Self {
+        Self { focus: 25, short: 5, long: 15, cycles: 4, auto_breaks: true, auto_focus: false }
+    }
+}
+
+impl Timeline {
+    fn clamped(self) -> Self {
+        Self {
+            focus: self.focus.clamp(1, 180),
+            short: self.short.clamp(1, 60),
+            long: self.long.clamp(1, 90),
+            cycles: self.cycles.clamp(1, 12),
+            ..self
+        }
+    }
 }
 
 /// The timer lives in Rust, not the webview, so it keeps exact time even when
@@ -33,7 +55,7 @@ struct Timer {
     ends_at: Option<Instant>,
     paused_left: Duration,
     completed: u32,
-    d: Durations,
+    tl: Timeline,
 }
 
 #[derive(Clone, PartialEq, Serialize)]
@@ -47,24 +69,35 @@ struct Snapshot {
 }
 
 impl Timer {
-    fn new() -> Self {
-        let d = Durations { focus: 25 * 60, short: 5 * 60, long: 15 * 60, cycles_per_long: 4 };
-        Self {
+    fn new(tl: Timeline) -> Self {
+        let mut t = Self {
             mode: Mode::Focus,
             running: false,
             ends_at: None,
-            paused_left: Duration::from_secs(d.focus),
+            paused_left: Duration::ZERO,
             completed: 0,
-            d,
-        }
+            tl,
+        };
+        t.reset();
+        t
     }
 
     fn total(&self) -> Duration {
-        Duration::from_secs(match self.mode {
-            Mode::Focus => self.d.focus,
-            Mode::Short => self.d.short,
-            Mode::Long => self.d.long,
-        })
+        let minutes = match self.mode {
+            Mode::Focus => self.tl.focus,
+            Mode::Short => self.tl.short,
+            Mode::Long => self.tl.long,
+        };
+        Duration::from_secs(minutes as u64 * 60)
+    }
+
+    /// New lengths apply right away only to a phase you haven't started yet.
+    fn set_timeline(&mut self, tl: Timeline) {
+        let untouched = !self.running && self.paused_left == self.total();
+        self.tl = tl;
+        if untouched {
+            self.reset();
+        }
     }
 
     fn left(&self) -> Duration {
@@ -97,7 +130,7 @@ impl Timer {
                 if counted {
                     self.completed += 1;
                 }
-                if counted && self.completed % self.d.cycles_per_long == 0 {
+                if counted && self.completed % self.tl.cycles == 0 {
                     Mode::Long
                 } else {
                     Mode::Short
@@ -115,7 +148,7 @@ impl Timer {
             total: self.total().as_secs(),
             running: self.running,
             completed: self.completed,
-            cycles_per_long: self.d.cycles_per_long,
+            cycles_per_long: self.tl.cycles,
         }
     }
 }
@@ -127,11 +160,17 @@ struct Settings {
     focus_mix: [f32; LAYERS],
     break_mix: [f32; LAYERS],
     muted: bool,
+    timeline: Timeline,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { focus_mix: [0.6, 0.45, 0.0], break_mix: [0.5, 0.0, 0.35], muted: false }
+        Self {
+            focus_mix: [0.6, 0.45, 0.0],
+            break_mix: [0.5, 0.0, 0.35],
+            muted: false,
+            timeline: Timeline::default(),
+        }
     }
 }
 
@@ -201,8 +240,8 @@ fn spawn_ticker(app: AppHandle) {
                 if t.running && t.left().is_zero() {
                     let ended = t.mode;
                     t.advance(true);
-                    // Breaks start on their own; the next focus session waits for you.
-                    if t.mode != Mode::Focus {
+                    let auto = if t.mode == Mode::Focus { t.tl.auto_focus } else { t.tl.auto_breaks };
+                    if auto {
                         t.toggle();
                     }
                     finished = Some((ended, t.mode));
@@ -245,6 +284,14 @@ fn timer_skip(app: State<'_, App>) -> Snapshot {
 }
 
 #[tauri::command]
+fn timeline_set(app: State<'_, App>, timeline: Timeline) -> Snapshot {
+    let tl = timeline.clamped();
+    app.settings.lock().unwrap().timeline = tl;
+    app.save_settings();
+    app.with_timer(|t| t.set_timeline(tl))
+}
+
+#[tauri::command]
 fn sound_state(app: State<'_, App>) -> Settings {
     app.settings.lock().unwrap().clone()
 }
@@ -282,8 +329,9 @@ pub fn run() {
                 .ok()
                 .and_then(|s| serde_json::from_str(&s).ok())
                 .unwrap_or_default();
+            let settings: Settings = settings;
             app.manage(App {
-                timer: Mutex::new(Timer::new()),
+                timer: Mutex::new(Timer::new(settings.timeline.clamped())),
                 settings: Mutex::new(settings),
                 settings_path,
                 audio: Audio::start(),
@@ -296,6 +344,7 @@ pub fn run() {
             timer_toggle,
             timer_reset,
             timer_skip,
+            timeline_set,
             sound_state,
             sound_set_level,
             sound_set_muted
