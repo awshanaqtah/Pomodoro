@@ -92,6 +92,26 @@
       </div>
 
       <div class="page tasks" data-page="tasks" hidden>
+        <div class="cal" id="cal">
+          <div class="cal-row">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5.5" width="16" height="14.5" rx="2" /><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4" /></svg>
+            <span class="cal-text" id="cal-text">Import today's events from Google Calendar</span>
+            <button id="cal-refresh" title="Sync now" hidden>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.4-5.7M20 4v4h-4" /></svg>
+            </button>
+            <button id="cal-edit" title="Calendar link" aria-expanded="false">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" /></svg>
+            </button>
+          </div>
+          <form class="cal-form" id="cal-form" autocomplete="off" hidden>
+            <input id="cal-url" type="password" spellcheck="false" placeholder="Paste the secret iCal address" aria-label="Secret iCal address" />
+            <div class="cal-actions">
+              <button type="submit" class="save">Save</button>
+              <button type="button" id="cal-remove" class="ghost-text">Disconnect</button>
+            </div>
+            <p class="hint">Google Calendar → ⚙ Settings → your calendar → Integrate calendar → <b>Secret address in iCal format</b>. The link is saved only on this PC.</p>
+          </form>
+        </div>
         <ul class="task-list" id="task-list"></ul>
         <p class="empty" id="task-empty">No tasks yet. Add what you want to get done today.<br />Tap a task to work on it.</p>
         <form class="add-task" id="add-task" autocomplete="off">

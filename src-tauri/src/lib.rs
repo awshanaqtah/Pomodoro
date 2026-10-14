@@ -1,7 +1,9 @@
 mod audio;
+mod calendar;
 mod tasks;
 
 use std::path::PathBuf;
+use std::sync::mpsc::{self, Sender};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -163,6 +165,8 @@ struct Settings {
     break_mix: [f32; LAYERS],
     muted: bool,
     timeline: Timeline,
+    /// Private iCal link. Stays on this PC.
+    calendar_url: Option<String>,
 }
 
 impl Default for Settings {
@@ -172,6 +176,7 @@ impl Default for Settings {
             break_mix: [0.5, 0.0, 0.35],
             muted: false,
             timeline: Timeline::default(),
+            calendar_url: None,
         }
     }
 }
@@ -184,6 +189,18 @@ struct App {
     /// App config dir holding settings.json, tasks.json and history.json.
     dir: PathBuf,
     audio: Audio,
+    calendar: Mutex<CalendarStatus>,
+    /// Wakes the calendar thread for an immediate sync.
+    calendar_sync: Sender<()>,
+}
+
+#[derive(Clone, Default, Serialize)]
+struct CalendarStatus {
+    connected: bool,
+    syncing: bool,
+    last_sync: Option<String>,
+    error: Option<String>,
+    events: usize,
 }
 
 impl App {
@@ -249,6 +266,57 @@ fn notify(app: &AppHandle, ended: Mode, next: Mode) {
     let _ = app.notification().builder().title(title).body(body).show();
 }
 
+/// Keeps today's calendar events in the task list: on start, every 15 minutes, and on request.
+fn spawn_calendar(app: AppHandle, wake: mpsc::Receiver<()>) {
+    std::thread::spawn(move || {
+        let state = app.state::<App>();
+        let publish = |f: &dyn Fn(&mut CalendarStatus)| {
+            let status = {
+                let mut s = state.calendar.lock().unwrap();
+                f(&mut s);
+                s.clone()
+            };
+            let _ = app.emit("calendar-status", status);
+        };
+        loop {
+            if wake.recv_timeout(Duration::from_secs(15 * 60)) == Err(mpsc::RecvTimeoutError::Disconnected) {
+                return;
+            }
+            let url = state.settings.lock().unwrap().calendar_url.clone();
+            let Some(url) = url else {
+                state.with_tasks(|t| t.replace_calendar(Vec::new()));
+                publish(&|s| *s = CalendarStatus::default());
+                let _ = app.emit("tasks-changed", ());
+                continue;
+            };
+            publish(&|s| {
+                s.connected = true;
+                s.syncing = true;
+            });
+            match calendar::fetch(&url) {
+                Ok(ics) => {
+                    let minutes = state.timer.lock().unwrap().tl.focus;
+                    let events = calendar::today_tasks(&ics, chrono::Local::now().date_naive(), minutes);
+                    let count = events.len();
+                    state.with_tasks(|t| t.replace_calendar(events));
+                    let now = chrono::Local::now().format("%H:%M").to_string();
+                    publish(&|s| {
+                        s.syncing = false;
+                        s.last_sync = Some(now.clone());
+                        s.error = None;
+                        s.events = count;
+                    });
+                    let _ = app.emit("tasks-changed", ());
+                }
+                Err(e) => publish(&|s| {
+                    s.syncing = false;
+                    s.error = Some(e.clone());
+                }),
+            }
+        }
+    });
+}
+
 /// Background ticker: finishes phases and pushes a snapshot to the UI only when something changed.
 fn spawn_ticker(app: AppHandle) {
     std::thread::spawn(move || {
@@ -260,6 +328,7 @@ fn spawn_ticker(app: AppHandle) {
             beat = beat.wrapping_add(1);
             if beat % 300 == 0 && state.tasks.lock().unwrap().roll_over() {
                 tasks::save(&state.dir.join("tasks.json"), &*state.tasks.lock().unwrap());
+                let _ = state.calendar_sync.send(()); // fetch the new day's events
                 let _ = app.emit("tasks-changed", ());
             }
             let (snap, finished) = {
@@ -363,6 +432,25 @@ fn task_set_active(app: State<'_, App>, id: Option<String>) -> Tasks {
 }
 
 #[tauri::command]
+fn calendar_status(app: State<'_, App>) -> CalendarStatus {
+    app.calendar.lock().unwrap().clone()
+}
+
+/// Saves (or, with an empty string, removes) the iCal link and syncs right away.
+#[tauri::command]
+fn calendar_set_url(app: State<'_, App>, url: String) {
+    let url = url.trim();
+    app.settings.lock().unwrap().calendar_url = (!url.is_empty()).then(|| url.to_string());
+    app.save_settings();
+    let _ = app.calendar_sync.send(());
+}
+
+#[tauri::command]
+fn calendar_refresh(app: State<'_, App>) {
+    let _ = app.calendar_sync.send(());
+}
+
+#[tauri::command]
 fn sound_state(app: State<'_, App>) -> Settings {
     app.settings.lock().unwrap().clone()
 }
@@ -397,6 +485,8 @@ pub fn run() {
         .setup(|app| {
             let dir = app.path().app_config_dir()?;
             let settings: Settings = tasks::load(&dir.join("settings.json"));
+            let (calendar_sync, calendar_wake) = mpsc::channel();
+            let _ = calendar_sync.send(()); // first sync as soon as the thread starts
             app.manage(App {
                 timer: Mutex::new(Timer::new(settings.timeline.clamped())),
                 settings: Mutex::new(settings),
@@ -404,8 +494,11 @@ pub fn run() {
                 history: Mutex::new(tasks::load(&dir.join("history.json"))),
                 dir,
                 audio: Audio::start(),
+                calendar: Mutex::new(CalendarStatus::default()),
+                calendar_sync,
             });
             spawn_ticker(app.handle().clone());
+            spawn_calendar(app.handle().clone(), calendar_wake);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -419,6 +512,9 @@ pub fn run() {
             task_update,
             task_remove,
             task_set_active,
+            calendar_status,
+            calendar_set_url,
+            calendar_refresh,
             sound_state,
             sound_set_level,
             sound_set_muted

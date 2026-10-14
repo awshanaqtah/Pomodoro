@@ -309,6 +309,62 @@ $("add-task").addEventListener("submit", (e) => {
   titleInput.value = "";
 });
 
+// --- calendar ---
+
+interface CalendarStatus {
+  connected: boolean;
+  syncing: boolean;
+  last_sync: string | null;
+  error: string | null;
+  events: number;
+}
+
+const calEl = $("cal");
+const calText = $("cal-text");
+const calForm = $<HTMLFormElement>("cal-form");
+const calUrl = $<HTMLInputElement>("cal-url");
+const calEdit = $("cal-edit");
+const calRefresh = $("cal-refresh");
+
+function renderCalendar(c: CalendarStatus) {
+  calEl.classList.toggle("syncing", c.syncing);
+  calEl.classList.toggle("error", !!c.error && !c.syncing);
+  calRefresh.hidden = !c.connected;
+  $("cal-remove").hidden = !c.connected;
+  calUrl.placeholder = c.connected ? "Paste a new link to replace the saved one" : "Paste the secret iCal address";
+  if (!c.connected) calText.textContent = "Import today's events from Google Calendar";
+  else if (c.syncing) calText.textContent = "Syncing your calendar…";
+  else if (c.error) calText.textContent = c.error;
+  else {
+    const n = c.events === 1 ? "1 event" : `${c.events} events`;
+    calText.textContent = `${n} today · synced ${c.last_sync ?? ""}`;
+  }
+}
+
+function showCalForm(open: boolean) {
+  calForm.hidden = !open;
+  calEdit.setAttribute("aria-expanded", String(open));
+  if (open) calUrl.focus();
+}
+
+calEl.querySelector(".cal-row")!.addEventListener("click", (e) => {
+  if ((e.target as Element).closest("#cal-refresh")) return;
+  showCalForm(calEdit.getAttribute("aria-expanded") !== "true");
+});
+calRefresh.addEventListener("click", () => invoke("calendar_refresh"));
+calForm.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const url = calUrl.value.trim();
+  if (!url) return;
+  invoke("calendar_set_url", { url });
+  calUrl.value = "";
+  showCalForm(false);
+});
+$("cal-remove").addEventListener("click", () => {
+  invoke("calendar_set_url", { url: "" });
+  showCalForm(false);
+});
+
 const command = (name: string) => invoke<Snapshot>(name).then(render);
 const toggle = () => command("timer_toggle");
 
@@ -340,6 +396,8 @@ window.addEventListener("keydown", (e) => {
 
 listen<Snapshot>("tick", (e) => render(e.payload));
 listen("tasks-changed", () => taskCall("tasks_get", {}));
+listen<CalendarStatus>("calendar-status", (e) => renderCalendar(e.payload));
+invoke<CalendarStatus>("calendar_status").then(renderCalendar);
 taskCall("tasks_get", {});
 command("timer_state");
 invoke<Sound>("sound_state").then((s) => {

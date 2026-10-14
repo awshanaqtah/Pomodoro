@@ -24,6 +24,9 @@ serde_json = "1"
 cpal = { version = "0.18.2", default-features = false }
 tauri-plugin-notification = "2"
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+ureq = "3"
+rrule = "0.14"
+chrono-tz = "0.10"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
