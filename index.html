@@ -35,6 +35,13 @@
         </div>
       </header>
 
+      <nav class="pages" role="tablist">
+        <button role="tab" data-page="timer" aria-selected="true">Timer</button>
+        <button role="tab" data-page="tasks" aria-selected="false">Tasks <span class="count" id="task-count"></span></button>
+      </nav>
+
+      <div class="page" data-page="timer">
+
       <section class="dial" data-tauri-drag-region>
         <svg class="ring" viewBox="0 0 200 200" aria-hidden="true">
           <circle class="ring-track" cx="100" cy="100" r="88" />
@@ -44,6 +51,7 @@
           <span class="mode" id="mode">Focus</span>
           <span class="time" id="time">25:00</span>
           <span class="dots" id="dots"></span>
+          <span class="active-task" id="active-task"></span>
         </div>
       </section>
 
@@ -81,6 +89,21 @@
           <input type="range" min="0" max="100" data-layer="2" />
         </label>
       </section>
+      </div>
+
+      <div class="page tasks" data-page="tasks" hidden>
+        <ul class="task-list" id="task-list"></ul>
+        <p class="empty" id="task-empty">No tasks yet. Add what you want to get done today.<br />Tap a task to work on it.</p>
+        <form class="add-task" id="add-task" autocomplete="off">
+          <input id="task-title" maxlength="80" placeholder="Add a task…" aria-label="New task" />
+          <button type="button" id="task-kind" class="kind" aria-pressed="false" title="One-off: gone the day after you finish it">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 3l3 3-3 3M20 6H8a4 4 0 0 0-4 4v1M7 21l-3-3 3-3M4 18h12a4 4 0 0 0 4-4v-1" /></svg>
+          </button>
+          <button type="submit" class="add" title="Add task">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+          </button>
+        </form>
+      </div>
 
       <section class="panel" id="settings" hidden>
         <h2>Your timeline</h2>

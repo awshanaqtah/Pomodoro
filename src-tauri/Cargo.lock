@@ -2727,6 +2727,7 @@ dependencies = [
 name = "pomodoro"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "cpal",
  "serde",
  "serde_json",

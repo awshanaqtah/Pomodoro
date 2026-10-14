@@ -178,6 +178,137 @@ flagInputs.forEach((el) =>
 gearBtn.addEventListener("click", () => showSettings(gearBtn.getAttribute("aria-expanded") !== "true"));
 $("settings-done").addEventListener("click", () => showSettings(false));
 
+// --- pages ---
+
+const pageTabs = Array.from(document.querySelectorAll<HTMLButtonElement>(".pages button"));
+const pages = Array.from(document.querySelectorAll<HTMLElement>(".page"));
+
+function showPage(name: string) {
+  pageTabs.forEach((t) => t.setAttribute("aria-selected", String(t.dataset.page === name)));
+  pages.forEach((p) => (p.hidden = p.dataset.page !== name));
+}
+pageTabs.forEach((t) => t.addEventListener("click", () => showPage(t.dataset.page!)));
+
+// --- tasks ---
+
+type Kind = "daily" | "once" | "calendar";
+
+interface Task {
+  id: string;
+  title: string;
+  kind: Kind;
+  estimate: number;
+  sessions: number;
+  done: boolean;
+  time: string | null;
+  start: number | null;
+}
+
+interface Tasks {
+  day: string;
+  active: string | null;
+  list: Task[];
+}
+
+const ICON = {
+  check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>',
+  remove: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" /></svg>',
+  daily:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 3l3 3-3 3M20 6H8a4 4 0 0 0-4 4v1M7 21l-3-3 3-3M4 18h12a4 4 0 0 0 4-4v-1" /></svg>',
+  calendar:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5.5" width="16" height="14.5" rx="2" /><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4" /></svg>',
+};
+
+let tasks: Tasks = { day: "", active: null, list: [] };
+const listEl = $("task-list");
+const emptyEl = $("task-empty");
+const countEl = $("task-count");
+const activeEl = $("active-task");
+const kindBtn = $("task-kind");
+const titleInput = $<HTMLInputElement>("task-title");
+
+// Open tasks first; calendar events in time order; everything else as added.
+const ordered = (list: Task[]) =>
+  [...list].sort((a, b) => Number(a.done) - Number(b.done) || (a.start ?? 1e4) - (b.start ?? 1e4));
+
+function renderTasks(t: Tasks) {
+  tasks = t;
+  const open = t.list.filter((x) => !x.done).length;
+  countEl.textContent = open ? String(open) : "";
+  emptyEl.hidden = t.list.length > 0;
+  const active = t.list.find((x) => x.id === t.active);
+  activeEl.textContent = active ? active.title : "";
+  listEl.replaceChildren(...ordered(t.list).map(taskRow));
+}
+
+const taskCall = (name: string, args: Record<string, unknown>) => invoke<Tasks>(name, args).then(renderTasks);
+
+function taskRow(task: Task): HTMLLIElement {
+  const li = document.createElement("li");
+  li.className = `task${task.done ? " done" : ""}${task.id === tasks.active ? " active" : ""}`;
+  li.title = task.id === tasks.active ? "Working on this. Tap to stop." : "Tap to work on this";
+  li.innerHTML = `<button class="check" aria-label="Mark done">${ICON.check}</button>
+    <div class="body"><span class="title"></span><span class="meta"></span></div>`;
+  li.querySelector(".title")!.textContent = task.title;
+
+  const meta = li.querySelector(".meta")!;
+  if (task.kind === "daily") meta.insertAdjacentHTML("beforeend", `${ICON.daily}<span>daily</span>`);
+  if (task.kind === "calendar") {
+    meta.insertAdjacentHTML("beforeend", ICON.calendar);
+    const when = document.createElement("span");
+    when.textContent = task.time ?? "all day";
+    meta.append(when);
+  }
+  const pips = document.createElement("span");
+  pips.className = "pips";
+  pips.title = `${task.sessions} of ${task.estimate} focus sessions. Click to change the plan.`;
+  for (let i = 0; i < Math.max(task.estimate, task.sessions); i++) {
+    const pip = document.createElement("i");
+    if (i < task.sessions) pip.className = "on";
+    pips.append(pip);
+  }
+  meta.append(pips);
+
+  li.querySelector(".check")!.addEventListener("click", (e) => {
+    e.stopPropagation();
+    taskCall("task_update", { id: task.id, done: !task.done });
+  });
+  pips.addEventListener("click", (e) => {
+    e.stopPropagation();
+    taskCall("task_update", { id: task.id, estimate: (task.estimate % 6) + 1 });
+  });
+  // Calendar events come back on the next sync, so they're ticked off rather than removed.
+  if (task.kind !== "calendar") {
+    const remove = document.createElement("button");
+    remove.className = "remove";
+    remove.setAttribute("aria-label", "Remove task");
+    remove.innerHTML = ICON.remove;
+    remove.addEventListener("click", (e) => {
+      e.stopPropagation();
+      taskCall("task_remove", { id: task.id });
+    });
+    li.append(remove);
+  }
+  li.addEventListener("click", () =>
+    taskCall("task_set_active", { id: task.id === tasks.active ? null : task.id }),
+  );
+  return li;
+}
+
+kindBtn.addEventListener("click", () => {
+  const daily = kindBtn.getAttribute("aria-pressed") !== "true";
+  kindBtn.setAttribute("aria-pressed", String(daily));
+  kindBtn.title = daily ? "Daily: comes back every morning" : "One-off: gone the day after you finish it";
+});
+$("add-task").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const title = titleInput.value.trim();
+  if (!title) return;
+  const kind = kindBtn.getAttribute("aria-pressed") === "true" ? "daily" : "once";
+  taskCall("task_add", { title, kind, estimate: 1 });
+  titleInput.value = "";
+});
+
 const command = (name: string) => invoke<Snapshot>(name).then(render);
 const toggle = () => command("timer_toggle");
 
@@ -198,6 +329,7 @@ window.addEventListener("keydown", (e) => {
     if (e.key === "Escape") showSettings(false);
     return; // typing in the settings shouldn't drive the timer
   }
+  if (e.target instanceof HTMLInputElement && e.target.type !== "range") return;
   if (e.code === "Space") toggle();
   else if (e.key === "r" || e.key === "R") command("timer_reset");
   else if (e.key === "s" || e.key === "S") command("timer_skip");
@@ -207,6 +339,8 @@ window.addEventListener("keydown", (e) => {
 });
 
 listen<Snapshot>("tick", (e) => render(e.payload));
+listen("tasks-changed", () => taskCall("tasks_get", {}));
+taskCall("tasks_get", {});
 command("timer_state");
 invoke<Sound>("sound_state").then((s) => {
   sound = s;
