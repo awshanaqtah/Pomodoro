@@ -55,8 +55,8 @@ a polished nature theme takes much more work); WPF or WinUI (needs the .NET runt
 | 1 | **Your timeline**: you set the focus, short break and long break lengths, sessions per set and a daily goal; auto-start options | ✅ done |
 | 3 | **Tasks, progress, rewards** (see below): tasks, Google Calendar import, Progress page and growing forest are done; streak unlocks are still to do | ✅ mostly |
 | 4 | **Spotify**: now-playing card with album art and ⏮ ⏯ ⏭ through Windows media controls (no login, works with Spotify Free); Spotify plays while you focus and pauses on breaks or pause, optionally keeps playing on breaks | ✅ done |
-| 5 ⏳ next | Widget polish: tray menu, pin-to-desktop or always-on-top, start with Windows, custom icon | |
-| 6 | Lightness pass: measure RAM, destroy the webview on hide, release installer, GitHub release | |
+| 5 | **Widget polish**: tray icon (time left on hover, Start/Pause, Skip, Mute, Start with Windows, Quit), ✕ hides to the tray, pin modes (normal, always on top, pinned to the desktop), remembered position, single instance, app icon | ✅ done |
+| 6 | **Lightness**: the webview is destroyed while hidden, so the tray app idles at about 8 MB (145 MB with the widget open); installer is 2.5 MB. Still to do: a GitHub release per version | ✅ mostly |
 
 ### Phase 3: tasks, progress, rewards
 

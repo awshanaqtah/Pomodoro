@@ -2,10 +2,12 @@ mod audio;
 mod calendar;
 mod music;
 mod tasks;
+mod widget;
 
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use audio::{Audio, LAYERS};
@@ -172,6 +174,11 @@ struct Settings {
     /// Private iCal link. Stays on this PC.
     calendar_url: Option<String>,
     music: MusicSettings,
+    pin: widget::Pin,
+    /// Where you last left the widget, in physical pixels.
+    window_pos: Option<[i32; 2]>,
+    /// The "still running in the tray" notice is shown once.
+    tray_hint_shown: bool,
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
@@ -198,6 +205,9 @@ impl Default for Settings {
             timeline: Timeline::default(),
             calendar_url: None,
             music: MusicSettings::default(),
+            pin: widget::Pin::default(),
+            window_pos: None,
+            tray_hint_shown: false,
         }
     }
 }
@@ -215,6 +225,9 @@ struct App {
     calendar_sync: Sender<()>,
     music: Sender<music::Cmd>,
     now_playing: Arc<Mutex<music::NowPlaying>>,
+    tray: OnceLock<widget::Tray>,
+    /// Set by Quit, so closing windows on the way out isn't mistaken for "hide to tray".
+    quitting: AtomicBool,
 }
 
 #[derive(Clone, Default, Serialize)]
@@ -240,6 +253,12 @@ impl App {
             (true, _) => s.break_mix,
         };
         self.audio.set_targets(levels);
+    }
+
+    fn set_muted(&self, muted: bool) {
+        self.settings.lock().unwrap().muted = muted;
+        self.sync_audio();
+        self.save_settings();
     }
 
     fn save_settings(&self) {
@@ -402,6 +421,9 @@ fn spawn_ticker(app: AppHandle) {
             }
             if last.as_ref() != Some(&snap) {
                 let _ = app.emit("tick", snap.clone());
+                if let Some(tray) = state.tray.get() {
+                    widget::update_tray(tray, &snap, last.as_ref());
+                }
                 last = Some(snap);
             }
             std::thread::sleep(Duration::from_millis(200));
@@ -550,15 +572,26 @@ fn sound_set_level(app: State<'_, App>, scope: String, layer: usize, value: f32,
 
 #[tauri::command]
 fn sound_set_muted(app: State<'_, App>, muted: bool) {
-    app.settings.lock().unwrap().muted = muted;
-    app.sync_audio();
+    app.set_muted(muted);
+    if let Some(tray) = app.tray.get() {
+        widget::set_tray_muted(tray, muted);
+    }
+}
+
+#[tauri::command]
+fn window_pin(window: tauri::WebviewWindow, app: State<'_, App>, pin: widget::Pin) {
+    app.settings.lock().unwrap().pin = pin;
     app.save_settings();
+    widget::apply_pin(&window, pin);
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Launching Pomodoro again just brings the running widget back.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| widget::show(app)))
         .plugin(tauri_plugin_notification::init())
+        .on_window_event(widget::on_window_event)
         .setup(|app| {
             let dir = app.path().app_config_dir()?;
             let settings: Settings = tasks::load(&dir.join("settings.json"));
@@ -577,7 +610,12 @@ pub fn run() {
                 calendar_sync,
                 music: music_tx,
                 now_playing: now_playing.clone(),
+                tray: OnceLock::new(),
+                quitting: AtomicBool::new(false),
             });
+            let tray = widget::build_tray(app.handle())?;
+            let _ = app.state::<App>().tray.set(tray);
+            widget::show(app.handle());
             music::spawn(app.handle().clone(), music_rx, now_playing);
             spawn_ticker(app.handle().clone());
             spawn_calendar(app.handle().clone(), calendar_wake);
@@ -604,8 +642,15 @@ pub fn run() {
             calendar_refresh,
             sound_state,
             sound_set_level,
-            sound_set_muted
+            sound_set_muted,
+            window_pin
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, event| {
+            // Closing the widget leaves Pomodoro running in the tray; only Quit exits.
+            if let tauri::RunEvent::ExitRequested { code: None, api, .. } = event {
+                api.prevent_exit();
+            }
+        });
 }

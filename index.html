@@ -23,13 +23,14 @@
           <button id="gear" title="Your timeline" aria-expanded="false">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10m4 0h2M4 17h2m4 0h10" /><circle cx="16" cy="7" r="2" /><circle cx="8" cy="17" r="2" /></svg>
           </button>
-          <button id="pin" title="Keep on top" aria-pressed="false">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6l-1 6 3 3H7l3-3-1-6Zm3 9v7" /></svg>
+          <button id="pin" data-pin="normal" title="Normal window. Click to keep it on top.">
+            <svg class="i-pin" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6l-1 6 3 3H7l3-3-1-6Zm3 9v7" /></svg>
+            <svg class="i-desktop" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="11.5" rx="1.5" /><path d="M9 20h6M12 16v4" /></svg>
           </button>
           <button id="min" title="Minimize">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12" /></svg>
           </button>
-          <button id="close" title="Close">
+          <button id="close" title="Hide to tray. Pomodoro keeps running.">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" /></svg>
           </button>
         </div>

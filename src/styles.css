@@ -81,7 +81,12 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .win button svg { width: 15px; height: 15px; }
 .win button:hover { background: var(--track); color: var(--text); }
 #close:hover { background: #c4433a; color: #fff; }
-#pin[aria-pressed="true"] { color: var(--accent); }
+#pin .i-desktop { display: none; }
+#pin[data-pin="top"] { color: var(--accent); }
+#pin[data-pin="top"] .i-pin path { fill: currentColor; }
+#pin[data-pin="desktop"] { color: var(--accent); }
+#pin[data-pin="desktop"] .i-pin { display: none; }
+#pin[data-pin="desktop"] .i-desktop { display: block; }
 
 /* --- dial --- */
 .dial {

@@ -70,6 +70,7 @@ interface Sound {
   muted: boolean;
   timeline: Timeline;
   music: { follow: boolean; on_breaks: boolean };
+  pin: "normal" | "top" | "desktop";
 }
 
 let sound: Sound = {
@@ -78,6 +79,7 @@ let sound: Sound = {
   muted: false,
   timeline: { focus: 25, short: 5, long: 15, cycles: 4, auto_breaks: true, auto_focus: false, goal: 8 },
   music: { follow: true, on_breaks: false },
+  pin: "normal",
 };
 let scope: Scope = "focus";
 let lastMode: Mode | undefined;
@@ -522,10 +524,22 @@ $("reset").addEventListener("click", () => command("timer_reset"));
 $("skip").addEventListener("click", () => command("timer_skip"));
 $("min").addEventListener("click", () => appWindow.minimize());
 $("close").addEventListener("click", () => appWindow.close());
-pinBtn.addEventListener("click", async () => {
-  const pinned = pinBtn.getAttribute("aria-pressed") !== "true";
-  await appWindow.setAlwaysOnTop(pinned);
-  pinBtn.setAttribute("aria-pressed", String(pinned));
+// Pin cycles: normal window → always on top → pinned to the desktop (behind everything).
+type Pin = "normal" | "top" | "desktop";
+const PIN_NEXT: Record<Pin, Pin> = { normal: "top", top: "desktop", desktop: "normal" };
+const PIN_TITLE: Record<Pin, string> = {
+  normal: "Normal window. Click to keep it on top.",
+  top: "Always on top. Click to pin it to the desktop.",
+  desktop: "Pinned to the desktop, behind your windows. Click for a normal window.",
+};
+function renderPin(pin: Pin) {
+  pinBtn.dataset.pin = pin;
+  pinBtn.title = PIN_TITLE[pin];
+}
+pinBtn.addEventListener("click", () => {
+  const pin = PIN_NEXT[(pinBtn.dataset.pin as Pin) ?? "normal"];
+  renderPin(pin);
+  invoke("window_pin", { pin });
 });
 
 window.addEventListener("keydown", (e) => {
@@ -547,6 +561,10 @@ listen<Snapshot>("tick", (e) => render(e.payload));
 listen("tasks-changed", () => taskCall("tasks_get", {}).then(loadProgress));
 listen<CalendarStatus>("calendar-status", (e) => renderCalendar(e.payload));
 listen<NowPlaying>("now-playing", (e) => renderMusic(e.payload));
+listen<boolean>("muted", (e) => {
+  sound.muted = e.payload; // changed from the tray menu
+  renderMixer();
+});
 invoke<NowPlaying>("music_now").then(renderMusic);
 invoke<CalendarStatus>("calendar_status").then(renderCalendar);
 taskCall("tasks_get", {});
@@ -554,5 +572,6 @@ command("timer_state");
 invoke<Sound>("sound_state").then((s) => {
   sound = s;
   renderMixer();
+  renderPin(s.pin);
   loadProgress();
 });
