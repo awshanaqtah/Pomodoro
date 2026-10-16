@@ -16,7 +16,7 @@ $version = (Get-Content "$root\src-tauri\tauri.conf.json" -Raw | ConvertFrom-Jso
 $keyDir = Join-Path $env:USERPROFILE ".tauri"
 
 $env:TAURI_SIGNING_PRIVATE_KEY = (Get-Content (Join-Path $keyDir "pomodoro-updater.key") -Raw).Trim()
-$secure = Get-Content (Join-Path $keyDir "pomodoro-updater.password") -Raw | ConvertTo-SecureString
+$secure = (Get-Content (Join-Path $keyDir "pomodoro-updater.password") -Raw).Trim() | ConvertTo-SecureString
 $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = [System.Net.NetworkCredential]::new("", $secure).Password
 try {
     Push-Location $root
