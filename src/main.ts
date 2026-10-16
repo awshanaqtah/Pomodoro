@@ -555,12 +555,37 @@ $("cal-remove").addEventListener("click", () => {
 
 // --- progress and the forest ---
 
+interface Reward {
+  id: string;
+  name: string;
+  hint: string;
+  unlocked: boolean;
+  progress: number;
+}
+
 interface Progress {
   today_sessions: number;
   today_minutes: number;
   streak: number;
   best_streak: number;
   week: { label: string; minutes: number; today: boolean }[];
+  total_sessions: number;
+  rewards: Reward[];
+  by_task: { title: string; minutes: number }[];
+}
+
+interface DayCell {
+  date: string;
+  minutes: number;
+  sessions: number;
+}
+
+interface SessionView {
+  index: number;
+  at: string | null;
+  minutes: number;
+  task: string | null;
+  note: string | null;
 }
 
 const GOAL_CIRCUMFERENCE = 2 * Math.PI * 52;
@@ -600,7 +625,191 @@ function renderProgress(p: Progress) {
     p.today_sessions >= FOREST_SLOTS
       ? "Your forest is full today. What a day."
       : "Every focus session plants a tree in your forest below.";
+  renderByTask(p.by_task);
+  renderRewards(p.rewards);
   plantForest(p.today_sessions);
+  loadMonth();
+}
+
+const REWARD_ICONS: Record<string, string> = {
+  pines: "🌲",
+  maples: "🍁",
+  blossoms: "🌸",
+  fireflies: "✨",
+  moon: "🌕",
+  owl: "🦉",
+  campfire: "🏕️",
+  aurora: "🌌",
+};
+let unlocked = new Set<string>(["pines"]);
+
+function renderRewards(list: Reward[]) {
+  const next = new Set(list.filter((r) => r.unlocked).map((r) => r.id));
+  if ([...next].join() !== [...unlocked].join()) plantedToday = -1; // redraw the forest with them
+  unlocked = next;
+  document.body.dataset.aurora = String(unlocked.has("aurora"));
+  $("rewards").replaceChildren(
+    ...list.map((r) => {
+      const tile = document.createElement("div");
+      tile.className = `reward${r.unlocked ? " on" : ""}`;
+      tile.title = r.unlocked ? `${r.name}: unlocked` : `${r.name}: unlocks at ${r.hint}`;
+      const icon = document.createElement("b");
+      icon.textContent = REWARD_ICONS[r.id] ?? "🌱";
+      const name = document.createElement("span");
+      name.textContent = r.name;
+      tile.append(icon, name);
+      if (!r.unlocked) {
+        const meter = document.createElement("span");
+        meter.className = "meter";
+        meter.innerHTML = `<i style="width:${Math.round(r.progress * 100)}%"></i>`;
+        tile.append(meter);
+      }
+      return tile;
+    }),
+  );
+}
+
+function renderByTask(list: { title: string; minutes: number }[]) {
+  const el = $("by-task");
+  if (!list.length) {
+    el.innerHTML = "<p>Pick a task before you focus and its time shows up here.</p>";
+    return;
+  }
+  const most = list[0].minutes;
+  el.replaceChildren(
+    ...list.map((t) => {
+      const row = document.createElement("div");
+      row.className = "row";
+      const title = document.createElement("span");
+      title.textContent = t.title;
+      const time = document.createElement("span");
+      time.textContent = duration(t.minutes);
+      const bar = document.createElement("i");
+      bar.style.width = `${Math.max(4, (t.minutes / most) * 100)}%`;
+      row.append(title, time, bar);
+      return row;
+    }),
+  );
+}
+
+// --- forest calendar: one tree per day, sized by how long you focused ---
+
+let monthShown = new Date();
+monthShown.setDate(1);
+let selectedDay: string | null = null;
+const todayIso = () => new Date().toLocaleDateString("en-CA");
+
+function dayTree(minutes: number) {
+  if (!minutes) return '<svg viewBox="0 0 24 24"><rect x="9" y="21" width="6" height="1.5" rx=".75" opacity=".5" /></svg>';
+  const h = minutes < 30 ? 7 : minutes < 90 ? 12 : minutes < 180 ? 17 : 21;
+  return `<svg viewBox="0 0 24 24"><path d="${pine(12, h, 22.5)}" /></svg>`;
+}
+
+function loadMonth() {
+  const year = monthShown.getFullYear();
+  const month = monthShown.getMonth() + 1;
+  $("month-name").textContent = monthShown.toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+  invoke<DayCell[]>("month_get", { year, month }).then((days) => {
+    const today = todayIso();
+    const lead = (new Date(year, month - 1, 1).getDay() + 6) % 7; // Monday first
+    const heads = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].map((d) => {
+      const el = document.createElement("span");
+      el.className = "dow";
+      el.textContent = d;
+      return el;
+    });
+    const blanks = Array.from({ length: lead }, () => document.createElement("span"));
+    const cells = days.map((d) => {
+      const cell = document.createElement("button");
+      cell.className = `day${d.date === today ? " today" : ""}${d.date > today ? " future" : ""}${d.date === selectedDay ? " selected" : ""}`;
+      cell.title = d.minutes ? `${duration(d.minutes)} · ${d.sessions} session${d.sessions === 1 ? "" : "s"}` : "No focus";
+      cell.innerHTML = `<span>${Number(d.date.slice(8))}</span>${dayTree(d.minutes)}`;
+      cell.addEventListener("click", () => showDay(d.date));
+      return cell;
+    });
+    $("month-grid").replaceChildren(...heads, ...blanks, ...cells);
+  });
+}
+
+function showDay(date: string) {
+  const detail = $("day-detail");
+  if (selectedDay === date) {
+    selectedDay = null;
+    detail.hidden = true;
+    loadMonth();
+    return;
+  }
+  selectedDay = date;
+  loadMonth();
+  invoke<SessionView[]>("day_get", { date }).then((sessions) => {
+    detail.hidden = false;
+    if (!sessions.length) {
+      detail.innerHTML = "<p>No focus that day.</p>";
+      return;
+    }
+    detail.replaceChildren(
+      ...sessions.map((s) => {
+        const line = document.createElement("div");
+        const when = document.createElement("span");
+        when.className = "when";
+        when.textContent = `${s.at ?? "--:--"} · ${s.minutes} min${s.task ? " · " : ""}`;
+        line.append(when, s.task ?? "");
+        if (s.note) {
+          const note = document.createElement("span");
+          note.className = "note-text";
+          note.textContent = `“${s.note}”`;
+          line.append(note);
+        }
+        return line;
+      }),
+    );
+  });
+}
+
+$("month-prev").addEventListener("click", () => {
+  monthShown = new Date(monthShown.getFullYear(), monthShown.getMonth() - 1, 1);
+  loadMonth();
+});
+$("month-next").addEventListener("click", () => {
+  monthShown = new Date(monthShown.getFullYear(), monthShown.getMonth() + 1, 1);
+  loadMonth();
+});
+
+// --- session notes: a line about what that focus session got done ---
+
+let noteFor: SessionView | null = null;
+
+function askForNote(s: SessionView | null) {
+  noteFor = s;
+  const form = $<HTMLFormElement>("note");
+  form.hidden = !s;
+  if (!s) return;
+  $("note-label").textContent = `What did you get done?${s.task ? ` (${s.task})` : ""}`;
+  $<HTMLInputElement>("note-text").value = "";
+}
+
+function finishNote(text: string) {
+  if (!noteFor) return;
+  invoke("note_save", { index: noteFor.index, text }).then(loadProgress);
+  askForNote(null);
+}
+
+$("note").addEventListener("submit", (e) => {
+  e.preventDefault();
+  finishNote($<HTMLInputElement>("note-text").value.trim());
+});
+$("note-skip").addEventListener("click", () => finishNote(""));
+const loadNote = () => invoke<SessionView | null>("note_pending").then(askForNote);
+
+// --- a moment of celebration when the forest gains something ---
+
+let toastTimer: number | undefined;
+function toast(text: string) {
+  const el = $("toast");
+  el.textContent = text;
+  el.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => (el.hidden = true), 5000);
 }
 
 // Tree layout is fixed per day (seeded by the date), so earlier trees never move.
@@ -615,8 +824,7 @@ function forestLayout(day: string) {
   return slots.map((slot) => ({ x: 7 + slot * 12.1 + (rand() - 0.5) * 6, h: 20 + rand() * 22 }));
 }
 
-function pine(x: number, h: number) {
-  const base = 56;
+function pine(x: number, h: number, base = 56) {
   const w = h * 0.5;
   const tier = (bottom: number, top: number, half: number) =>
     `M${(x - half).toFixed(1)} ${bottom.toFixed(1)}L${x.toFixed(1)} ${top.toFixed(1)}L${(x + half).toFixed(1)} ${bottom.toFixed(1)}Z`;
@@ -633,16 +841,72 @@ function plantForest(sessions: number) {
   const trees = layout.slice(0, count).map((t, i) => ({ ...t, i }));
   // Taller trees behind shorter ones.
   trees.sort((a, b) => b.h - a.h);
+  const species = ["pine", ...(unlocked.has("maples") ? ["maple"] : []), ...(unlocked.has("blossoms") ? ["blossom"] : [])];
   forestEl.replaceChildren(
     ...trees.map(({ x, h, i }) => {
-      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-      path.setAttribute("d", pine(x, h));
       const glow = (i + 1) % cycles === 0; // every full set grows a glowing tree
-      path.setAttribute("class", `tree${glow ? " glow" : ""}${plantedToday >= 0 && i >= plantedToday ? " grow" : ""}`);
+      const kind = glow ? "pine" : species[(i * 7 + Math.round(x)) % species.length];
+      const path = svgEl("path");
+      path.setAttribute("d", kind === "pine" ? pine(x, h) : roundTree(x, h, kind === "blossom"));
+      path.setAttribute("class", `tree ${kind}${glow ? " glow" : ""}${plantedToday >= 0 && i >= plantedToday ? " grow" : ""}`);
       return path;
     }),
+    ...forestExtras(),
   );
   plantedToday = count;
+}
+
+const svgEl = (tag: string) => document.createElementNS("http://www.w3.org/2000/svg", tag);
+
+/** A broadleaf tree: trunk plus a round crown (three puffs for blossom). */
+function roundTree(x: number, h: number, puffy: boolean) {
+  const base = 56;
+  const r = h * 0.3;
+  const cy = base - h + r;
+  const circle = (cx: number, cy: number, r: number) =>
+    `M${(cx - r).toFixed(1)} ${cy.toFixed(1)}a${r.toFixed(1)} ${r.toFixed(1)} 0 1 0 ${(2 * r).toFixed(1)} 0a${r.toFixed(1)} ${r.toFixed(1)} 0 1 0 ${(-2 * r).toFixed(1)} 0Z`;
+  const trunk = `M${(x - 0.8).toFixed(1)} ${base}V${(cy + r * 0.6).toFixed(1)}h1.6V${base}Z`;
+  const crown = puffy
+    ? circle(x - r * 0.45, cy + r * 0.25, r * 0.7) + circle(x + r * 0.45, cy + r * 0.25, r * 0.7) + circle(x, cy - r * 0.2, r * 0.75)
+    : circle(x, cy, r);
+  return trunk + crown;
+}
+
+/** The moon, an owl, fireflies and a campfire, as you earn them. */
+function forestExtras(): SVGElement[] {
+  const out: SVGElement[] = [];
+  if (unlocked.has("moon")) {
+    const moon = svgEl("circle");
+    moon.setAttribute("cx", "272");
+    moon.setAttribute("cy", "14");
+    moon.setAttribute("r", "5");
+    moon.setAttribute("class", "moon");
+    out.push(moon);
+  }
+  if (unlocked.has("owl")) {
+    // perched on the peak of the far ridge
+    const owl = svgEl("g");
+    owl.innerHTML = `<path class="owl" d="M53 21c0-2.5 1.3-4 3-4s3 1.5 3 4v3h-6Z M53.3 17.6l.6-1.6 1 1.2Z M58.7 17.6l-.6-1.6-1 1.2Z" />
+      <circle class="owl-eye" cx="55.1" cy="19" r=".55" /><circle class="owl-eye" cx="56.9" cy="19" r=".55" />`;
+    out.push(owl);
+  }
+  if (unlocked.has("campfire")) {
+    const fire = svgEl("g");
+    fire.innerHTML = `<path class="trunk" d="M144 56.5l9-2 .5 1.2-9 2ZM145 54.5l9 2-.5 1.2-9-2Z" />
+      <path class="flame" d="M149 55c-2.2 0-3.2-1.6-2.6-3.4.4-1.2 1.4-1.8 1.6-3.6 1.4 1 2 2.2 1.9 3.3.6-.4.9-1 1-1.7 1 .9 1.7 2.1 1.4 3.4-.3 1.2-1.4 2-3.3 2Z" />`;
+    out.push(fire);
+  }
+  if (unlocked.has("fireflies")) {
+    for (const [x, y] of [[40, 34], [96, 28], [131, 40], [188, 31], [233, 38], [262, 30]]) {
+      const fly = svgEl("circle");
+      fly.setAttribute("cx", String(x));
+      fly.setAttribute("cy", String(y));
+      fly.setAttribute("r", ".9");
+      fly.setAttribute("class", "firefly");
+      out.push(fly);
+    }
+  }
+  return out;
 }
 
 const loadProgress = () => invoke<Progress>("progress_get").then(renderProgress);
@@ -805,6 +1069,11 @@ listen("tasks-changed", () => taskCall("tasks_get", {}).then(loadProgress));
 listen<CalendarStatus>("calendar-status", (e) => renderCalendar(e.payload));
 listen<NowPlaying>("now-playing", (e) => renderMusic(e.payload));
 listen<boolean>("mini", (e) => renderMini(e.payload)); // from the shortcut or tray
+listen<Mode>("phase-done", (e) => {
+  if (e.payload === "focus") loadNote();
+});
+listen<string[]>("reward", (e) => toast(`New in your forest: ${e.payload.join(", ")} ✨`));
+loadNote();
 listen<boolean>("muted", (e) => {
   sound.muted = e.payload; // changed from the tray menu
   renderMixer();

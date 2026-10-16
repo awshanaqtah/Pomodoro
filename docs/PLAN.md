@@ -64,8 +64,8 @@ a polished nature theme takes much more work); WPF or WinUI (needs the .NET runt
 |---|---|---|---|
 | Sound | 0.3.0 | Wind, stream, ocean, crickets and brown noise layers; scenes (built-in and your own); your own recordings per layer from a folder; fade-out over the last minute of focus; Sounds tab | ✅ done |
 | Focus | 0.4.0 | Mini mode (232×64 pill), global shortcuts (Ctrl+Alt+P / M / W), away pause that gives back the lost minutes, break ideas | ✅ done |
-| Progress | 0.5.0 | Streak unlocks, forest calendar, time per task, session notes | ⏳ next |
-| Look | 0.6.0 | Time-of-day theme, seasons, living background, size options | |
+| Progress | 0.5.0 | Rewards the forest gains (maples, blossoms, fireflies, moon, owl, campfire, northern lights) by sessions and best streak; forest calendar month view with each day's sessions and notes; this week by task; optional note after each focus session | ✅ done |
+| Look | 0.6.0 | Time-of-day theme, seasons, living background, size options | ⏳ next |
 | Bigger | 0.7.0 | Auto-update through a public releases repo; focus together with Stella through a small Cloudflare Worker relay | |
 
 ### Phase 3: tasks, progress, rewards

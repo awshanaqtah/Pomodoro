@@ -122,6 +122,12 @@ pub struct Session {
     pub day: String,
     pub minutes: u32,
     pub task: Option<String>,
+    /// When the session ended, "HH:MM".
+    #[serde(default)]
+    pub at: Option<String>,
+    /// What you got done; an empty note means you skipped the question.
+    #[serde(default)]
+    pub note: Option<String>,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -177,6 +183,7 @@ pub struct Progress {
     pub best_streak: u32,
     /// The last seven days, oldest first.
     pub week: Vec<DayStat>,
+    pub total_sessions: u32,
 }
 
 impl History {
@@ -220,7 +227,7 @@ impl History {
             })
             .collect();
 
-        Progress { today_sessions, today_minutes, streak, best_streak, week }
+        Progress { today_sessions, today_minutes, streak, best_streak, week, total_sessions: self.sessions.len() as u32 }
     }
 }
 
@@ -237,6 +244,8 @@ mod tests {
                     day: (today - TimeDelta::days(n)).format("%Y-%m-%d").to_string(),
                     minutes: 25,
                     task: None,
+                    at: None,
+                    note: None,
                 })
                 .collect(),
         }

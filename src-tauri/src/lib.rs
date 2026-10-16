@@ -1,6 +1,8 @@
 mod audio;
 mod calendar;
 mod ideas;
+mod rewards;
+mod stats;
 mod music;
 mod tasks;
 mod widget;
@@ -313,6 +315,8 @@ struct App {
     quitting: AtomicBool,
     /// Why a global shortcut couldn't be registered, if one couldn't.
     shortcut_error: Mutex<Option<String>>,
+    /// The session waiting for a note, as an index into the history.
+    note_pending: Mutex<Option<usize>>,
 }
 
 #[derive(Clone, Default, Serialize)]
@@ -365,7 +369,8 @@ impl App {
     }
 
     /// A finished focus session goes into the history and counts toward the active task.
-    fn record_focus(&self, minutes: u32) {
+    /// Returns the names of any rewards it unlocked.
+    fn record_focus(&self, minutes: u32) -> Vec<&'static str> {
         let list = self.with_tasks(|t| {
             if let Some(task) = t.active_task() {
                 task.sessions += 1;
@@ -373,8 +378,17 @@ impl App {
         });
         let task = list.active.and_then(|id| list.list.into_iter().find(|t| t.id == id)).map(|t| t.title);
         let mut h = self.history.lock().unwrap();
-        h.sessions.push(Session { day: tasks::today(), minutes, task });
+        let before = self.rewards_for(&h);
+        let at = chrono::Local::now().format("%H:%M").to_string();
+        h.sessions.push(Session { day: tasks::today(), minutes, task, at: Some(at), note: None });
+        *self.note_pending.lock().unwrap() = Some(h.sessions.len() - 1);
         tasks::save(&self.dir.join("history.json"), &*h);
+        rewards::newly_unlocked(&before, &self.rewards_for(&h))
+    }
+
+    fn rewards_for(&self, history: &History) -> Vec<rewards::Reward> {
+        let p = history.progress();
+        rewards::rewards(p.total_sessions, p.best_streak)
     }
 
     /// Runs a timer action, then brings the ambience and music in line with the new state.
@@ -529,8 +543,17 @@ fn spawn_ticker(app: AppHandle) {
                 state.sync_music();
                 if ended == Mode::Focus {
                     let minutes = state.timer.lock().unwrap().tl.focus;
-                    state.record_focus(minutes);
+                    let unlocked = state.record_focus(minutes);
                     let _ = app.emit("tasks-changed", ());
+                    if !unlocked.is_empty() {
+                        let _ = app
+                            .notification()
+                            .builder()
+                            .title("Your forest grew")
+                            .body(format!("New: {}", unlocked.join(", ")))
+                            .show();
+                        let _ = app.emit("reward", unlocked);
+                    }
                 }
                 state.sync_audio();
                 state.audio.chime();
@@ -618,9 +641,51 @@ fn task_set_active(app: State<'_, App>, id: Option<String>) -> Tasks {
     app.with_tasks(|t| t.active = id.filter(|id| t.list.iter().any(|task| &task.id == id)))
 }
 
+#[derive(Serialize)]
+struct ProgressView {
+    #[serde(flatten)]
+    progress: tasks::Progress,
+    rewards: Vec<rewards::Reward>,
+    by_task: Vec<stats::TaskTime>,
+}
+
 #[tauri::command]
-fn progress_get(app: State<'_, App>) -> tasks::Progress {
-    app.history.lock().unwrap().progress()
+fn progress_get(app: State<'_, App>) -> ProgressView {
+    let h = app.history.lock().unwrap();
+    ProgressView { progress: h.progress(), rewards: app.rewards_for(&h), by_task: stats::by_task(&h, 7) }
+}
+
+#[tauri::command]
+fn month_get(app: State<'_, App>, year: i32, month: u32) -> Vec<stats::DayCell> {
+    stats::month(&app.history.lock().unwrap(), year, month)
+}
+
+#[tauri::command]
+fn day_get(app: State<'_, App>, date: String) -> Vec<stats::SessionView> {
+    stats::day(&app.history.lock().unwrap(), &date)
+}
+
+/// The session that just ended, if it's still waiting for a note.
+#[tauri::command]
+fn note_pending(app: State<'_, App>) -> Option<stats::SessionView> {
+    let index = (*app.note_pending.lock().unwrap())?;
+    let h = app.history.lock().unwrap();
+    let day = h.sessions.get(index)?.day.clone();
+    stats::day(&h, &day).into_iter().find(|s| s.index == index)
+}
+
+/// Saves a note on a session; an empty note just dismisses the question.
+#[tauri::command]
+fn note_save(app: State<'_, App>, index: usize, text: String) {
+    let mut h = app.history.lock().unwrap();
+    if let Some(s) = h.sessions.get_mut(index) {
+        s.note = Some(text.trim().chars().take(140).collect());
+        tasks::save(&app.dir.join("history.json"), &*h);
+    }
+    let mut pending = app.note_pending.lock().unwrap();
+    if *pending == Some(index) {
+        *pending = None;
+    }
 }
 
 #[tauri::command]
@@ -814,6 +879,7 @@ pub fn run() {
                 tray: OnceLock::new(),
                 quitting: AtomicBool::new(false),
                 shortcut_error: Mutex::new(None),
+                note_pending: Mutex::new(None),
             });
             let tray = widget::build_tray(app.handle())?;
             let _ = app.state::<App>().tray.set(tray);
@@ -839,6 +905,10 @@ pub fn run() {
             task_remove,
             task_set_active,
             progress_get,
+            month_get,
+            day_get,
+            note_pending,
+            note_save,
             music_now,
             music_control,
             music_settings_set,
@@ -924,6 +994,17 @@ mod tests {
 
 #[cfg(test)]
 mod live {
+    /// Run by hand: checks the real history and tasks load in this version (prints only counts).
+    #[test]
+    #[ignore]
+    fn real_history_loads() {
+        let dir = std::path::PathBuf::from(std::env::var("APPDATA").unwrap()).join("com.awshanaqtah.pomodoro");
+        let history: crate::tasks::History = serde_json::from_str(&std::fs::read_to_string(dir.join("history.json")).unwrap_or_else(|_| "{}".into())).expect("history loads");
+        let tasks: crate::tasks::Tasks = serde_json::from_str(&std::fs::read_to_string(dir.join("tasks.json")).unwrap_or_else(|_| "{}".into())).expect("tasks load");
+        let p = history.progress();
+        println!("loaded: {} sessions, {} tasks, best streak {}", p.total_sessions, tasks.list.len(), p.best_streak);
+    }
+
     /// Run by hand: shows how long Windows says you've been idle.
     #[test]
     #[ignore]

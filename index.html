@@ -79,6 +79,15 @@
         <button id="away-resume">Resume</button>
       </div>
 
+      <form class="note" id="note" autocomplete="off" hidden>
+        <label for="note-text" id="note-label">What did you get done?</label>
+        <div class="note-row">
+          <input id="note-text" maxlength="140" placeholder="A few words, if you like" />
+          <button type="submit">Save</button>
+          <button type="button" id="note-skip" class="ghost-text">Skip</button>
+        </div>
+      </form>
+
       <div class="idea" id="idea" hidden>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path id="idea-icon" d="" /></svg>
         <span id="idea-text"></span>
@@ -177,6 +186,26 @@
         </div>
         <div class="bars" id="bars" aria-label="Focus minutes, last 7 days"></div>
         <p class="forest-note" id="forest-note">Every focus session plants a tree in your forest below.</p>
+
+        <section class="section month">
+          <header class="month-head">
+            <button id="month-prev" aria-label="Previous month">‹</button>
+            <h3 id="month-name">This month</h3>
+            <button id="month-next" aria-label="Next month">›</button>
+          </header>
+          <div class="month-grid" id="month-grid"></div>
+          <div class="day-detail" id="day-detail" hidden></div>
+        </section>
+
+        <section class="section">
+          <h3>This week by task</h3>
+          <div class="by-task" id="by-task"></div>
+        </section>
+
+        <section class="section">
+          <h3>Your forest</h3>
+          <div class="rewards" id="rewards"></div>
+        </section>
       </div>
 
       <section class="panel" id="settings" hidden>
@@ -242,6 +271,8 @@
         <path class="ground" d="M0 60V55q80-4 150-1t150-1V60Z" />
       </svg>
     </main>
+    <div class="toast" id="toast" role="status" hidden></div>
+
     <main class="pill" id="pill" data-tauri-drag-region hidden>
       <svg class="pill-ring" viewBox="0 0 44 44" aria-hidden="true">
         <circle class="ring-track" cx="22" cy="22" r="18" />
