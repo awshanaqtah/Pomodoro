@@ -10,6 +10,7 @@
 
   <body data-mode="focus" data-running="false">
     <main class="widget" data-tauri-drag-region>
+      <div class="weather" id="weather" aria-hidden="true"></div>
       <header class="bar" data-tauri-drag-region>
         <span class="brand" data-tauri-drag-region>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19c0-8 5-13 14-14-1 9-6 14-14 14Zm0 0 7-7" /></svg>
@@ -258,6 +259,18 @@
         <label class="switch"><input type="checkbox" id="fade-out" /> <span>Fade sounds out in the last minute</span></label>
         <label class="switch"><input type="checkbox" id="music-follow" /> <span>Spotify plays while you focus</span></label>
         <label class="switch"><input type="checkbox" id="music-breaks" /> <span>Keep it playing on breaks</span></label>
+        <h2 class="sub">Look</h2>
+        <label class="switch"><input type="checkbox" id="look-time" /> <span>Colours follow the time of day</span></label>
+        <label class="switch"><input type="checkbox" id="look-seasons" /> <span>Seasons in the forest</span></label>
+        <label class="switch"><input type="checkbox" id="look-living" /> <span>Embers while focusing, rain on breaks</span></label>
+        <div class="size-row">
+          <span>Size</span>
+          <div class="seg" id="look-size" role="radiogroup" aria-label="Widget size">
+            <button role="radio" data-size="small">Small</button>
+            <button role="radio" data-size="medium">Medium</button>
+            <button role="radio" data-size="large">Large</button>
+          </div>
+        </div>
         <h2 class="sub">Shortcuts</h2>
         <label class="switch"><input type="checkbox" id="shortcuts" /> <span>Work from anywhere in Windows</span></label>
         <p class="hint keys">Ctrl+Alt+P start or pause · Ctrl+Alt+M mini mode · Ctrl+Alt+W show or hide<span id="shortcut-error"></span></p>

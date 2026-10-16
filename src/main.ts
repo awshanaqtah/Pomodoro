@@ -96,6 +96,16 @@ interface Sound {
   fade_out: boolean;
   mini: boolean;
   shortcuts: boolean;
+  look: Look;
+}
+
+type Size = "small" | "medium" | "large";
+
+interface Look {
+  time_theme: boolean;
+  seasons: boolean;
+  living: boolean;
+  size: Size;
 }
 
 // Same order as the Rust engine, whose layer names are also the file names for your recordings.
@@ -144,6 +154,7 @@ let sound: Sound = {
   fade_out: true,
   mini: false,
   shortcuts: true,
+  look: { time_theme: true, seasons: true, living: true, size: "medium" },
 };
 let scope: Scope = "focus"; // the mix shown on the Sounds page
 let lastMode: Mode | undefined;
@@ -842,21 +853,38 @@ function plantForest(sessions: number) {
   // Taller trees behind shorter ones.
   trees.sort((a, b) => b.h - a.h);
   const species = ["pine", ...(unlocked.has("maples") ? ["maple"] : []), ...(unlocked.has("blossoms") ? ["blossom"] : [])];
+  const kindOf = ({ x, i }: { x: number; i: number }) =>
+    (i + 1) % cycles === 0 ? "pine" : species[(i * 7 + Math.round(x)) % species.length];
   forestEl.replaceChildren(
-    ...trees.map(({ x, h, i }) => {
+    ...trees.map((t) => {
+      const { x, h, i } = t;
       const glow = (i + 1) % cycles === 0; // every full set grows a glowing tree
-      const kind = glow ? "pine" : species[(i * 7 + Math.round(x)) % species.length];
+      const kind = kindOf(t);
       const path = svgEl("path");
       path.setAttribute("d", kind === "pine" ? pine(x, h) : roundTree(x, h, kind === "blossom"));
       path.setAttribute("class", `tree ${kind}${glow ? " glow" : ""}${plantedToday >= 0 && i >= plantedToday ? " grow" : ""}`);
       return path;
     }),
+    ...snowCaps(trees.filter((t) => kindOf(t) === "pine")),
     ...forestExtras(),
   );
   plantedToday = count;
 }
 
 const svgEl = (tag: string) => document.createElementNS("http://www.w3.org/2000/svg", tag);
+
+/** In winter, the top of every tree carries snow. */
+function snowCaps(trees: { x: number; h: number }[]): SVGElement[] {
+  if (document.body.dataset.season !== "winter") return [];
+  return trees.map(({ x, h }) => {
+    const cap = svgEl("path");
+    const top = 56 - h;
+    const w = h * 0.5 * 0.18;
+    cap.setAttribute("d", `M${(x - w).toFixed(1)} ${(top + h * 0.14).toFixed(1)}L${x.toFixed(1)} ${top.toFixed(1)}L${(x + w).toFixed(1)} ${(top + h * 0.14).toFixed(1)}Z`);
+    cap.setAttribute("class", "snow");
+    return cap;
+  });
+}
 
 /** A broadleaf tree: trunk plus a round crown (three puffs for blossom). */
 function roundTree(x: number, h: number, puffy: boolean) {
@@ -1023,6 +1051,79 @@ shortcutsBox.addEventListener("change", () => {
   invoke<string | null>("shortcuts_set", { on: shortcutsBox.checked }).then(showShortcutError);
 });
 
+// --- look: time of day, seasons, living background, size ---
+
+const SCALE: Record<Size, number> = { small: 0.85, medium: 1, large: 1.15 };
+
+function timeOfDay() {
+  const h = new Date().getHours();
+  return h >= 5 && h < 8 ? "dawn" : h >= 8 && h < 17 ? "day" : h >= 17 && h < 20 ? "dusk" : "night";
+}
+
+function season() {
+  const m = new Date().getMonth(); // 0 = January
+  return m >= 2 && m <= 4 ? "spring" : m >= 5 && m <= 7 ? "summer" : m >= 8 && m <= 10 ? "autumn" : "winter";
+}
+
+function applyLook() {
+  const look = sound.look;
+  const body = document.body.dataset;
+  body.time = look.time_theme ? timeOfDay() : "day";
+  const nextSeason = look.seasons ? season() : "summer";
+  if (body.season !== nextSeason) {
+    body.season = nextSeason;
+    plantedToday = -1; // snow caps come and go with the season
+    loadProgress();
+  }
+  body.living = String(look.living);
+  document.documentElement.style.zoom = String(SCALE[look.size]);
+  lookTime.checked = look.time_theme;
+  lookSeasons.checked = look.seasons;
+  lookLiving.checked = look.living;
+  sizeButtons.forEach((b) => b.setAttribute("aria-checked", String(b.dataset.size === look.size)));
+}
+
+function saveLook() {
+  applyLook();
+  invoke("look_set", { look: sound.look });
+}
+
+// A dozen embers or raindrops, each with its own place and pace. CSS animates them.
+$("weather").replaceChildren(
+  ...Array.from({ length: 14 }, () => {
+    const p = document.createElement("i");
+    p.style.left = `${Math.random() * 100}%`;
+    p.style.setProperty("--d", `${7 + Math.random() * 7}s`);
+    p.style.setProperty("--delay", `${-Math.random() * 12}s`);
+    p.style.setProperty("--drift", `${(Math.random() - 0.5) * 60}px`);
+    return p;
+  }),
+);
+
+const lookTime = $<HTMLInputElement>("look-time");
+const lookSeasons = $<HTMLInputElement>("look-seasons");
+const lookLiving = $<HTMLInputElement>("look-living");
+const sizeButtons = Array.from(document.querySelectorAll<HTMLButtonElement>("#look-size button"));
+lookTime.addEventListener("change", () => {
+  sound.look.time_theme = lookTime.checked;
+  saveLook();
+});
+lookSeasons.addEventListener("change", () => {
+  sound.look.seasons = lookSeasons.checked;
+  saveLook();
+});
+lookLiving.addEventListener("change", () => {
+  sound.look.living = lookLiving.checked;
+  saveLook();
+});
+sizeButtons.forEach((b) =>
+  b.addEventListener("click", () => {
+    sound.look.size = b.dataset.size as Size;
+    saveLook();
+  }),
+);
+setInterval(applyLook, 60_000); // dawn turns to day while the widget is open
+
 const command = (name: string) => invoke<Snapshot>(name).then(render);
 const toggle = () => command("timer_toggle");
 
@@ -1083,10 +1184,11 @@ invoke<CalendarStatus>("calendar_status").then(renderCalendar);
 taskCall("tasks_get", {});
 command("timer_state");
 invoke<Sound>("sound_state").then((s) => {
-  sound = s;
+  sound = { ...sound, ...s, look: { ...sound.look, ...s.look } }; // anything missing keeps its default
   renderMixer();
   renderPin(s.pin);
   renderMini(s.mini);
+  applyLook();
   refreshCustom();
   invoke<string | null>("shortcuts_error").then(showShortcutError);
   loadProgress();

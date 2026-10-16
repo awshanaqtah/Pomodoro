@@ -219,6 +219,46 @@ struct Settings {
     mini: bool,
     /// Ctrl+Alt+P / M / W work from anywhere.
     shortcuts: bool,
+    look: Look,
+}
+
+/// How the widget looks. Everything here is drawn by the webview; Rust only keeps the
+/// choice and sizes the window to match.
+#[derive(Clone, Copy, Serialize, Deserialize)]
+#[serde(default)]
+struct Look {
+    /// Dawn, day, dusk and night palettes.
+    time_theme: bool,
+    /// Blossoms in spring, red leaves in autumn, snow in winter.
+    seasons: bool,
+    /// Embers drift up while you focus; rain falls on breaks.
+    living: bool,
+    size: Size,
+}
+
+impl Default for Look {
+    fn default() -> Self {
+        Self { time_theme: true, seasons: true, living: true, size: Size::Medium }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum Size {
+    Small,
+    Medium,
+    Large,
+}
+
+impl Size {
+    /// Matches the CSS zoom the webview applies for the same size.
+    fn scale(self) -> f64 {
+        match self {
+            Size::Small => 0.85,
+            Size::Medium => 1.0,
+            Size::Large => 1.15,
+        }
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -293,6 +333,7 @@ impl Default for Settings {
             tray_hint_shown: false,
             mini: false,
             shortcuts: true,
+            look: Look::default(),
         }
     }
 }
@@ -843,6 +884,17 @@ fn shortcuts_error(app: State<'_, App>) -> Option<String> {
 }
 
 #[tauri::command]
+fn look_set(window: tauri::WebviewWindow, app: State<'_, App>, look: Look) {
+    let mini = {
+        let mut s = app.settings.lock().unwrap();
+        s.look = look;
+        s.mini
+    };
+    app.save_settings();
+    widget::apply_size(window.app_handle(), &window, mini);
+}
+
+#[tauri::command]
 fn window_pin(window: tauri::WebviewWindow, app: State<'_, App>, pin: widget::Pin) {
     app.settings.lock().unwrap().pin = pin;
     app.save_settings();
@@ -926,6 +978,7 @@ pub fn run() {
             sounds_custom,
             sounds_open_folder,
             window_mini,
+            look_set,
             shortcuts_set,
             shortcuts_error,
             window_pin
@@ -958,6 +1011,7 @@ mod tests {
         assert_eq!((s.timeline.focus, s.timeline.goal, s.timeline.short), (50, 6, 5));
         assert!(s.pin == widget::Pin::Desktop && s.window_pos == Some([100, 200]));
         assert!(s.fade_out && s.scenes.is_empty(), "new settings get their defaults");
+        assert!(s.look.time_theme && s.look.size == Size::Medium && s.shortcuts && !s.mini);
     }
 
     /// Walking away mid-focus pauses the timer and gives back the time you were gone.

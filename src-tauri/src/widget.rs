@@ -86,14 +86,16 @@ fn main_config(app: &AppHandle) -> WindowConfig {
 /// The pill's size; the full widget's size comes from tauri.conf.json.
 const MINI_SIZE: (f64, f64) = (232.0, 64.0);
 
+/// Full widget or pill, times the chosen size (the webview zooms its content to match).
 pub fn apply_size(app: &AppHandle, window: &WebviewWindow, mini: bool) {
+    let scale = app.state::<App>().settings.lock().unwrap().look.size.scale();
     let (w, h) = if mini {
         MINI_SIZE
     } else {
         let c = main_config(app);
         (c.width, c.height)
     };
-    let _ = window.set_size(LogicalSize::new(w, h));
+    let _ = window.set_size(LogicalSize::new(w * scale, h * scale));
 }
 
 pub fn toggle_mini(app: &AppHandle) {
@@ -121,9 +123,7 @@ fn create(app: &AppHandle) -> tauri::Result<()> {
         let s = app.state::<App>().settings.lock().unwrap().clone();
         (s.window_pos, s.pin, s.mini)
     };
-    if mini {
-        apply_size(app, &window, true);
-    }
+    apply_size(app, &window, mini);
     if let Some([x, y]) = pos.filter(|p| on_screen(&window, *p)) {
         let _ = window.set_position(PhysicalPosition::new(x, y));
     }

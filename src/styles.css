@@ -62,6 +62,8 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* --- title bar --- */
 .bar {
+  position: relative;
+  z-index: 1; /* above the drifting embers and rain */
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -240,7 +242,7 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px 
   pointer-events: none;
 }
 .treeline path { stroke: none; }
-.treeline .far { fill: var(--far); }
+.treeline .far { fill: var(--ridge, var(--far)); }
 .treeline .ground,
 .treeline .tree { fill: var(--near); }
 .treeline .tree.glow {
@@ -809,3 +811,54 @@ body[data-aurora="true"] .widget::before {
   animation: aurora 14s ease-in-out infinite alternate;
 }
 @keyframes aurora { to { transform: translateX(30px) skewY(-3deg); opacity: 0.6; } }
+
+/* --- time of day: the palette shifts from dawn to night --- */
+body[data-time="dawn"] { --bg: #1c1622; --bg-2: #2b2131; --far: #382a3c; --near: #120e17; }
+body[data-time="dusk"] { --bg: #1e1612; --bg-2: #2d2019; --far: #3c2b1f; --near: #140e0b; }
+body[data-time="night"] { --bg: #0b101b; --bg-2: #131a2a; --far: #1a2437; --near: #070b13; --muted: #8995ab; }
+
+/* --- seasons in the forest --- */
+body[data-season="spring"] .treeline .tree.blossom { fill: #8c4f73; }
+body[data-season="spring"] .treeline .tree.maple { fill: #2f4d2a; }
+body[data-season="autumn"] { --ridge: color-mix(in srgb, var(--far) 72%, #8a5a1e); }
+body[data-season="autumn"] .treeline .tree.maple { fill: #9a3d1c; }
+body[data-season="autumn"] .treeline .tree.blossom { fill: #a8681e; }
+body[data-season="winter"] { --ridge: color-mix(in srgb, var(--far) 70%, #9fb2bd); }
+body[data-season="winter"] .treeline .ground { fill: #b9c6cc; }
+body[data-season="winter"] .treeline .tree.maple, body[data-season="winter"] .treeline .tree.blossom { fill: #2a2a2e; }
+.treeline .snow { fill: #e8eef0; }
+
+/* --- living background: embers rise while you focus, rain falls on breaks --- */
+.weather { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; border-radius: inherit; }
+body[data-living="false"] .weather { display: none; }
+body[data-running="false"] .weather { opacity: 0.35; }
+.weather i { position: absolute; display: block; }
+body[data-mode="focus"] .weather i {
+  bottom: -6px;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: #ffb066;
+  box-shadow: 0 0 6px #f08a3e;
+  animation: ember var(--d) linear infinite;
+  animation-delay: var(--delay);
+}
+@keyframes ember {
+  0% { transform: translate(0, 0); opacity: 0; }
+  15% { opacity: 0.9; }
+  100% { transform: translate(var(--drift), -70vh); opacity: 0; }
+}
+body:not([data-mode="focus"]) .weather i {
+  top: -20px;
+  width: 1px;
+  height: 14px;
+  background: linear-gradient(transparent, rgba(160, 205, 230, 0.55));
+  animation: rain calc(var(--d) * 0.12) linear infinite;
+  animation-delay: var(--delay);
+}
+@keyframes rain { to { transform: translate(-12px, 110vh); } }
+
+.size-row { display: flex; align-items: center; justify-content: space-between; height: 34px; font-size: 13px; }
+.seg { display: flex; gap: 2px; padding: 2px; border-radius: 9px; background: var(--track); }
+.seg button { height: 24px; padding: 0 9px; border-radius: 7px; font: inherit; font-size: 11.5px; color: var(--muted); }
+.seg button[aria-checked="true"] { color: var(--bg); background: var(--accent); }
