@@ -63,8 +63,8 @@ a polished nature theme takes much more work); WPF or WinUI (needs the .NET runt
 | Round | Version | Features | Status |
 |---|---|---|---|
 | Sound | 0.3.0 | Wind, stream, ocean, crickets and brown noise layers; scenes (built-in and your own); your own recordings per layer from a folder; fade-out over the last minute of focus; Sounds tab | ✅ done |
-| Focus | 0.4.0 | Mini mode, global shortcut, away detection, break ideas | ⏳ next |
-| Progress | 0.5.0 | Streak unlocks, forest calendar, time per task, session notes | |
+| Focus | 0.4.0 | Mini mode (232×64 pill), global shortcuts (Ctrl+Alt+P / M / W), away pause that gives back the lost minutes, break ideas | ✅ done |
+| Progress | 0.5.0 | Streak unlocks, forest calendar, time per task, session notes | ⏳ next |
 | Look | 0.6.0 | Time-of-day theme, seasons, living background, size options | |
 | Bigger | 0.7.0 | Auto-update through a public releases repo; focus together with Stella through a small Cloudflare Worker relay | |
 

@@ -1,6 +1,6 @@
 [package]
 name = "pomodoro"
-version = "0.3.0"
+version = "0.4.0"
 description = "A light nature-themed Pomodoro desktop widget"
 authors = ["Aws Hanaqtah"]
 edition = "2024"
@@ -27,12 +27,13 @@ chrono = { version = "0.4.45", default-features = false, features = ["clock", "s
 ureq = "3"
 rrule = "0.14"
 chrono-tz = "0.10"
-windows = { version = "0.62", features = ["Media_Control", "Foundation", "Foundation_Collections", "Storage_Streams", "Win32_System_WinRT"] }
+windows = { version = "0.62", features = ["Media_Control", "Foundation", "Foundation_Collections", "Storage_Streams", "Win32_System_WinRT", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_SystemInformation"] }
 base64 = "0.22"
 windows-registry = "0.100.0"
 tauri-plugin-single-instance = "2"
 symphonia = { version = "0.6", default-features = false, features = ["ogg", "vorbis", "mp3", "wav", "pcm", "flac"] }
 rtrb = "0.4"
+tauri-plugin-global-shortcut = "2"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

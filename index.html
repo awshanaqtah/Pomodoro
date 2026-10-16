@@ -20,6 +20,9 @@
             <svg class="i-sound" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4v-5Zm11.5-.5a4 4 0 0 1 0 6m2.5-8.5a7.5 7.5 0 0 1 0 11" /></svg>
             <svg class="i-muted" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4v-5Zm11.5.5 5 5m0-5-5 5" /></svg>
           </button>
+          <button id="mini" title="Mini mode (Ctrl+Alt+M)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 14h6v6M20 10h-6V4M10 14l-6 6M14 10l6-6" /></svg>
+          </button>
           <button id="gear" title="Your timeline" aria-expanded="false">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10m4 0h2M4 17h2m4 0h10" /><circle cx="16" cy="7" r="2" /><circle cx="8" cy="17" r="2" /></svg>
           </button>
@@ -70,6 +73,16 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 8 6-8 6V6Zm12 0v12" /></svg>
         </button>
       </nav>
+
+      <div class="away" id="away" hidden>
+        <span id="away-text">You were away, so the timer paused.</span>
+        <button id="away-resume">Resume</button>
+      </div>
+
+      <div class="idea" id="idea" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path id="idea-icon" d="" /></svg>
+        <span id="idea-text"></span>
+      </div>
 
       <section class="scenes quick" id="scenes-quick" aria-label="Sound scenes"></section>
 
@@ -203,12 +216,22 @@
           <button data-key="goal" data-delta="1" aria-label="Raise daily goal">+</button>
           <small>sess.</small>
         </div>
+        <div class="step">
+          <span title="Pauses focus when there's no keyboard or mouse for this long. 0 turns it off.">Away pause</span>
+          <button data-key="away" data-delta="-1" aria-label="Shorter away time">−</button>
+          <input type="number" data-key="away" min="0" max="30" aria-label="Away pause minutes" />
+          <button data-key="away" data-delta="1" aria-label="Longer away time">+</button>
+          <small>min</small>
+        </div>
         <label class="switch"><input type="checkbox" data-key="auto_breaks" /> <span>Start breaks automatically</span></label>
         <label class="switch"><input type="checkbox" data-key="auto_focus" /> <span>Start focus automatically</span></label>
         <h2 class="sub">Sound &amp; music</h2>
         <label class="switch"><input type="checkbox" id="fade-out" /> <span>Fade sounds out in the last minute</span></label>
         <label class="switch"><input type="checkbox" id="music-follow" /> <span>Spotify plays while you focus</span></label>
         <label class="switch"><input type="checkbox" id="music-breaks" /> <span>Keep it playing on breaks</span></label>
+        <h2 class="sub">Shortcuts</h2>
+        <label class="switch"><input type="checkbox" id="shortcuts" /> <span>Work from anywhere in Windows</span></label>
+        <p class="hint keys">Ctrl+Alt+P start or pause · Ctrl+Alt+M mini mode · Ctrl+Alt+W show or hide<span id="shortcut-error"></span></p>
         <p class="hint">Changes to a phase that's already running apply from the next phase.</p>
         <button class="panel-done" id="settings-done">Done</button>
       </section>
@@ -218,6 +241,23 @@
         <g id="forest"></g>
         <path class="ground" d="M0 60V55q80-4 150-1t150-1V60Z" />
       </svg>
+    </main>
+    <main class="pill" id="pill" data-tauri-drag-region hidden>
+      <svg class="pill-ring" viewBox="0 0 44 44" aria-hidden="true">
+        <circle class="ring-track" cx="22" cy="22" r="18" />
+        <circle class="ring-progress" id="pill-ring" cx="22" cy="22" r="18" />
+      </svg>
+      <div class="pill-text" data-tauri-drag-region>
+        <span class="pill-time" id="pill-time" data-tauri-drag-region>25:00</span>
+        <span class="pill-sub" id="pill-sub" data-tauri-drag-region>Focus</span>
+      </div>
+      <button class="pill-play" id="pill-toggle" title="Start / pause">
+        <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5L8 5.5Z" /></svg>
+        <svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14" /></svg>
+      </button>
+      <button class="pill-expand" id="pill-expand" title="Full size (double-click also works)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M10 20H4v-6M20 4l-6 6M4 20l6-6" /></svg>
+      </button>
     </main>
   </body>
 </html>

@@ -3,11 +3,16 @@
 //! sounds and Spotify keep running in Rust, and showing builds a fresh webview in under a second.
 
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewWindow, WebviewWindowBuilder, WindowEvent, Wry};
+use tauri::utils::config::WindowConfig;
+use tauri::{
+    AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, WebviewWindow, WebviewWindowBuilder, WindowEvent, Wry,
+};
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutEvent, ShortcutState};
 use tauri_plugin_notification::NotificationExt;
 
 use crate::{App, Mode, Snapshot, Timer};
@@ -68,21 +73,57 @@ fn toggle(app: &AppHandle) {
     if visible { hide(app) } else { show(app) }
 }
 
-fn create(app: &AppHandle) -> tauri::Result<()> {
-    let config = app
-        .config()
+fn main_config(app: &AppHandle) -> WindowConfig {
+    app.config()
         .app
         .windows
         .iter()
         .find(|w| w.label == MAIN)
         .cloned()
-        .expect("main window is defined in tauri.conf.json");
-    let window = WebviewWindowBuilder::from_config(app, &config)?.build()?;
+        .expect("main window is defined in tauri.conf.json")
+}
 
-    let (pos, pin) = {
-        let s = app.state::<App>().settings.lock().unwrap().clone();
-        (s.window_pos, s.pin)
+/// The pill's size; the full widget's size comes from tauri.conf.json.
+const MINI_SIZE: (f64, f64) = (232.0, 64.0);
+
+pub fn apply_size(app: &AppHandle, window: &WebviewWindow, mini: bool) {
+    let (w, h) = if mini {
+        MINI_SIZE
+    } else {
+        let c = main_config(app);
+        (c.width, c.height)
     };
+    let _ = window.set_size(LogicalSize::new(w, h));
+}
+
+pub fn toggle_mini(app: &AppHandle) {
+    let state = app.state::<App>();
+    let mini = {
+        let mut s = state.settings.lock().unwrap();
+        s.mini = !s.mini;
+        s.mini
+    };
+    state.save_settings();
+    match app.get_webview_window(MAIN) {
+        Some(w) => {
+            apply_size(app, &w, mini);
+            let _ = w.show();
+        }
+        None => show(app),
+    }
+    let _ = app.emit("mini", mini);
+}
+
+fn create(app: &AppHandle) -> tauri::Result<()> {
+    let window = WebviewWindowBuilder::from_config(app, &main_config(app))?.build()?;
+
+    let (pos, pin, mini) = {
+        let s = app.state::<App>().settings.lock().unwrap().clone();
+        (s.window_pos, s.pin, s.mini)
+    };
+    if mini {
+        apply_size(app, &window, true);
+    }
     if let Some([x, y]) = pos.filter(|p| on_screen(&window, *p)) {
         let _ = window.set_position(PhysicalPosition::new(x, y));
     }
@@ -250,4 +291,56 @@ fn set_autostart(on: bool) -> windows_registry::Result<()> {
         Some(cmd) if on => key.set_string(RUN_NAME, cmd),
         _ => key.remove_value(RUN_NAME).or(Ok(())),
     }
+}
+
+// ---------------------------------------------------------------- global shortcuts
+
+const SHORTCUTS: [(Code, &str); 3] = [(Code::KeyP, "Ctrl+Alt+P"), (Code::KeyM, "Ctrl+Alt+M"), (Code::KeyW, "Ctrl+Alt+W")];
+
+fn ctrl_alt() -> Modifiers {
+    Modifiers::CONTROL | Modifiers::ALT
+}
+
+/// Registers (or clears) the shortcuts. Returns a note if another app already owns one.
+pub fn set_shortcuts(app: &AppHandle, on: bool) -> Option<String> {
+    let keys = app.global_shortcut();
+    let _ = keys.unregister_all();
+    if !on {
+        return None;
+    }
+    let taken: Vec<&str> = SHORTCUTS
+        .iter()
+        .filter(|(code, _)| keys.register(Shortcut::new(Some(ctrl_alt()), *code)).is_err())
+        .map(|(_, name)| *name)
+        .collect();
+    (!taken.is_empty()).then(|| format!(" Already used by another app: {}.", taken.join(", ")))
+}
+
+pub fn on_shortcut(app: &AppHandle, shortcut: &Shortcut, event: ShortcutEvent) {
+    if event.state() != ShortcutState::Pressed {
+        return;
+    }
+    if shortcut.matches(ctrl_alt(), Code::KeyP) {
+        app.state::<App>().with_timer(Timer::toggle);
+    } else if shortcut.matches(ctrl_alt(), Code::KeyM) {
+        toggle_mini(app);
+    } else if shortcut.matches(ctrl_alt(), Code::KeyW) {
+        toggle(app);
+    }
+}
+
+// ---------------------------------------------------------------- away detection
+
+/// How long since the last keyboard or mouse input anywhere in Windows.
+pub fn idle_time() -> Duration {
+    use windows::Win32::System::SystemInformation::GetTickCount;
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
+    let mut info = LASTINPUTINFO { cbSize: size_of::<LASTINPUTINFO>() as u32, dwTime: 0 };
+    // SAFETY: `info` is a LASTINPUTINFO with cbSize set, as the API requires.
+    if !unsafe { GetLastInputInfo(&mut info) }.as_bool() {
+        return Duration::ZERO;
+    }
+    // SAFETY: GetTickCount has no preconditions.
+    let now = unsafe { GetTickCount() };
+    Duration::from_millis(now.wrapping_sub(info.dwTime) as u64)
 }

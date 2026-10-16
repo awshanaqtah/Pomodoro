@@ -11,10 +11,15 @@ interface Snapshot {
   running: boolean;
   completed: number;
   cycles_per_long: number;
+  /** Minutes you were away when the timer paused itself; 0 when it didn't. */
+  away: number;
+  /** Something to do with the current break. */
+  idea: { text: string; kind: string } | null;
 }
 
 const LABELS: Record<Mode, string> = { focus: "Focus", short: "Short break", long: "Long break" };
 const CIRCUMFERENCE = 2 * Math.PI * 88;
+const PILL_CIRCUMFERENCE = 2 * Math.PI * 18;
 
 const $ = <T extends Element = HTMLElement>(id: string) => document.getElementById(id) as unknown as T;
 const ring = $<SVGCircleElement>("ring");
@@ -39,6 +44,15 @@ function render(s: Snapshot) {
   // The ring fills up as the phase runs.
   ring.style.strokeDashoffset = String(CIRCUMFERENCE * (s.remaining / s.total));
 
+  // Mini mode shows the same timer in a pill.
+  $("pill-time").textContent = clock;
+  $("pill-ring").style.strokeDashoffset = String(PILL_CIRCUMFERENCE * (s.remaining / s.total));
+  pillMode = LABELS[s.mode];
+  renderPillSub();
+
+  renderAway(s);
+  renderIdea(s);
+
   // One dot per focus session in the current set; all lit during the long break.
   const lit = s.mode === "long" ? s.cycles_per_long : s.completed % s.cycles_per_long;
   dotsEl.replaceChildren(
@@ -62,6 +76,8 @@ interface Timeline {
   auto_breaks: boolean;
   auto_focus: boolean;
   goal: number;
+  /** Minutes without keyboard or mouse before focus pauses itself; 0 is off. */
+  away: number;
 }
 
 interface Scene {
@@ -78,6 +94,8 @@ interface Sound {
   pin: "normal" | "top" | "desktop";
   scenes: Scene[];
   fade_out: boolean;
+  mini: boolean;
+  shortcuts: boolean;
 }
 
 // Same order as the Rust engine, whose layer names are also the file names for your recordings.
@@ -119,11 +137,13 @@ let sound: Sound = {
   focus_mix: silentMix(),
   break_mix: silentMix(),
   muted: false,
-  timeline: { focus: 25, short: 5, long: 15, cycles: 4, auto_breaks: true, auto_focus: false, goal: 8 },
+  timeline: { focus: 25, short: 5, long: 15, cycles: 4, auto_breaks: true, auto_focus: false, goal: 8, away: 5 },
   music: { follow: true, on_breaks: false },
   pin: "normal",
   scenes: [],
   fade_out: true,
+  mini: false,
+  shortcuts: true,
 };
 let scope: Scope = "focus"; // the mix shown on the Sounds page
 let lastMode: Mode | undefined;
@@ -291,7 +311,7 @@ $("scenes-quick").addEventListener(
 
 // --- your timeline ---
 
-type NumberKey = "focus" | "short" | "long" | "cycles" | "goal";
+type NumberKey = "focus" | "short" | "long" | "cycles" | "goal" | "away";
 type FlagKey = "auto_breaks" | "auto_focus";
 
 const panel = $("settings");
@@ -303,6 +323,7 @@ function renderTimeline() {
   for (const el of numberInputs) el.value = String(sound.timeline[el.dataset.key as NumberKey]);
   for (const el of flagInputs) el.checked = sound.timeline[el.dataset.key as FlagKey];
   fadeBox.checked = sound.fade_out;
+  shortcutsBox.checked = sound.shortcuts;
   followBox.checked = sound.music.follow;
   breaksBox.checked = sound.music.on_breaks;
   breaksBox.disabled = !sound.music.follow;
@@ -404,6 +425,7 @@ function renderTasks(t: Tasks) {
   emptyEl.hidden = t.list.length > 0;
   const active = t.list.find((x) => x.id === t.active);
   activeEl.textContent = active ? active.title : "";
+  renderPillSub();
   listEl.replaceChildren(...ordered(t.list).map(taskRow));
 }
 
@@ -678,6 +700,65 @@ function saveMusicSettings() {
 followBox.addEventListener("change", saveMusicSettings);
 breaksBox.addEventListener("change", saveMusicSettings);
 
+// --- mini mode, away pause, break ideas, shortcuts ---
+
+const pill = $("pill");
+let pillMode = "Focus";
+
+function renderPillSub() {
+  const active = tasks.list.find((t) => t.id === tasks.active);
+  $("pill-sub").textContent = active ? `${pillMode} · ${active.title}` : pillMode;
+}
+
+function renderMini(on: boolean) {
+  sound.mini = on;
+  document.body.dataset.mini = String(on);
+  pill.hidden = !on;
+}
+
+function setMini(on: boolean) {
+  renderMini(on);
+  invoke("window_mini", { on });
+}
+
+$("mini").addEventListener("click", () => setMini(true));
+$("pill-expand").addEventListener("click", () => setMini(false));
+pill.addEventListener("dblclick", (e) => {
+  if (!(e.target as Element).closest("button")) setMini(false);
+});
+$("pill-toggle").addEventListener("click", () => command("timer_toggle"));
+
+function renderAway(s: Snapshot) {
+  const away = $("away");
+  away.hidden = !(s.away > 0 && !s.running);
+  $("away-text").textContent = `You were away ${s.away} min, so focus paused. Those minutes didn't count.`;
+}
+$("away-resume").addEventListener("click", () => command("timer_toggle"));
+
+const IDEA_ICONS: Record<string, string> = {
+  eyes: '<path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" /><circle cx="12" cy="12" r="2.5" />',
+  stretch: '<circle cx="12" cy="4.5" r="1.8" /><path d="M5 6l7 4 7-4M12 10v5l-3 6M12 15l3 6" />',
+  water: '<path d="M6 4h12l-1.5 16h-9L6 4ZM6.5 9h11" />',
+  breathe: '<circle cx="12" cy="12" r="3" /><circle cx="12" cy="12" r="6.5" opacity=".55" /><circle cx="12" cy="12" r="10" opacity=".25" />',
+  walk: '<circle cx="13" cy="4.5" r="1.8" /><path d="M10 21l2-6 3 3v3M12 15l1-6-4 2-1 3M13 9l3 3h3" />',
+  rest: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z" />',
+};
+
+function renderIdea(s: Snapshot) {
+  const card = $("idea");
+  card.hidden = !s.idea || s.mode === "focus";
+  if (!s.idea) return;
+  card.querySelector("svg")!.innerHTML = IDEA_ICONS[s.idea.kind] ?? IDEA_ICONS.rest;
+  $("idea-text").textContent = s.idea.text;
+}
+
+const shortcutsBox = $<HTMLInputElement>("shortcuts");
+const showShortcutError = (error: string | null) => ($("shortcut-error").textContent = error ?? "");
+shortcutsBox.addEventListener("change", () => {
+  sound.shortcuts = shortcutsBox.checked;
+  invoke<string | null>("shortcuts_set", { on: shortcutsBox.checked }).then(showShortcutError);
+});
+
 const command = (name: string) => invoke<Snapshot>(name).then(render);
 const toggle = () => command("timer_toggle");
 
@@ -723,6 +804,7 @@ listen<Snapshot>("tick", (e) => render(e.payload));
 listen("tasks-changed", () => taskCall("tasks_get", {}).then(loadProgress));
 listen<CalendarStatus>("calendar-status", (e) => renderCalendar(e.payload));
 listen<NowPlaying>("now-playing", (e) => renderMusic(e.payload));
+listen<boolean>("mini", (e) => renderMini(e.payload)); // from the shortcut or tray
 listen<boolean>("muted", (e) => {
   sound.muted = e.payload; // changed from the tray menu
   renderMixer();
@@ -735,6 +817,8 @@ invoke<Sound>("sound_state").then((s) => {
   sound = s;
   renderMixer();
   renderPin(s.pin);
+  renderMini(s.mini);
   refreshCustom();
+  invoke<string | null>("shortcuts_error").then(showShortcutError);
   loadProgress();
 });

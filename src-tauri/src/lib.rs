@@ -1,5 +1,6 @@
 mod audio;
 mod calendar;
+mod ideas;
 mod music;
 mod tasks;
 mod widget;
@@ -36,11 +37,13 @@ struct Timeline {
     auto_focus: bool,
     /// Focus sessions per day you're aiming for.
     goal: u32,
+    /// Minutes without keyboard or mouse before focus pauses itself; 0 turns it off.
+    away: u32,
 }
 
 impl Default for Timeline {
     fn default() -> Self {
-        Self { focus: 25, short: 5, long: 15, cycles: 4, auto_breaks: true, auto_focus: false, goal: 8 }
+        Self { focus: 25, short: 5, long: 15, cycles: 4, auto_breaks: true, auto_focus: false, goal: 8, away: 5 }
     }
 }
 
@@ -52,6 +55,7 @@ impl Timeline {
             long: self.long.clamp(1, 90),
             cycles: self.cycles.clamp(1, 12),
             goal: self.goal.clamp(1, 24),
+            away: self.away.min(30),
             ..self
         }
     }
@@ -66,6 +70,10 @@ struct Timer {
     paused_left: Duration,
     completed: u32,
     tl: Timeline,
+    /// Minutes you were away when focus paused itself; cleared when it runs again.
+    away: u32,
+    /// Something to do with the current break.
+    idea: Option<ideas::Idea>,
 }
 
 #[derive(Clone, PartialEq, Serialize)]
@@ -76,6 +84,8 @@ struct Snapshot {
     running: bool,
     completed: u32,
     cycles_per_long: u32,
+    away: u32,
+    idea: Option<ideas::Idea>,
 }
 
 impl Timer {
@@ -87,6 +97,8 @@ impl Timer {
             paused_left: Duration::ZERO,
             completed: 0,
             tl,
+            away: 0,
+            idea: None,
         };
         t.reset();
         t
@@ -123,11 +135,21 @@ impl Timer {
             self.ends_at = None;
         } else {
             self.ends_at = Some(Instant::now() + self.paused_left);
+            self.away = 0;
         }
         self.running = !self.running;
     }
 
+    /// You left mid-focus: pause, and give back the minutes you were gone.
+    fn pause_for_away(&mut self, idle: Duration) {
+        self.paused_left = (self.left() + idle).min(self.total());
+        self.ends_at = None;
+        self.running = false;
+        self.away = (idle.as_secs() / 60).max(1) as u32;
+    }
+
     fn reset(&mut self) {
+        self.away = 0;
         self.running = false;
         self.ends_at = None;
         self.paused_left = self.total();
@@ -148,6 +170,10 @@ impl Timer {
             }
             Mode::Short | Mode::Long => Mode::Focus,
         };
+        self.idea = match self.mode {
+            Mode::Focus => None,
+            m => Some(ideas::pick(m == Mode::Long, self.idea)),
+        };
         self.reset();
     }
 
@@ -159,6 +185,8 @@ impl Timer {
             running: self.running,
             completed: self.completed,
             cycles_per_long: self.tl.cycles,
+            away: self.away,
+            idea: self.idea,
         }
     }
 }
@@ -185,6 +213,10 @@ struct Settings {
     window_pos: Option<[i32; 2]>,
     /// The "still running in the tray" notice is shown once.
     tray_hint_shown: bool,
+    /// The widget is a small pill.
+    mini: bool,
+    /// Ctrl+Alt+P / M / W work from anywhere.
+    shortcuts: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -257,6 +289,8 @@ impl Default for Settings {
             pin: widget::Pin::default(),
             window_pos: None,
             tray_hint_shown: false,
+            mini: false,
+            shortcuts: true,
         }
     }
 }
@@ -277,6 +311,8 @@ struct App {
     tray: OnceLock<widget::Tray>,
     /// Set by Quit, so closing windows on the way out isn't mistaken for "hide to tray".
     quitting: AtomicBool,
+    /// Why a global shortcut couldn't be registered, if one couldn't.
+    shortcut_error: Mutex<Option<String>>,
 }
 
 #[derive(Clone, Default, Serialize)]
@@ -373,11 +409,15 @@ impl App {
     }
 }
 
-fn notify(app: &AppHandle, ended: Mode, next: Mode) {
-    let (title, body) = match (ended, next) {
-        (Mode::Focus, Mode::Long) => ("Focus done, long break", "You finished a full set. Take 15 minutes."),
-        (Mode::Focus, _) => ("Focus done, take a break", "Stretch, drink some water. 5 minutes."),
-        _ => ("Break's over", "Ready for the next focus session?"),
+fn notify(app: &AppHandle, ended: Mode, next: Mode, idea: Option<ideas::Idea>) {
+    let title = match (ended, next) {
+        (Mode::Focus, Mode::Long) => "Full set done, long break",
+        (Mode::Focus, _) => "Focus done, take a break",
+        _ => "Break's over",
+    };
+    let body = match idea {
+        Some(idea) => idea.text,
+        None => "Ready for the next focus session?",
     };
     let _ = app.notification().builder().title(title).body(body).show();
 }
@@ -439,6 +479,7 @@ fn spawn_ticker(app: AppHandle) {
         let state = app.state::<App>();
         let mut last: Option<Snapshot> = None;
         let mut beat: u32 = 0;
+        let mut away_paused = false;
         loop {
             // About once a minute, start a new day for the task list if midnight has passed.
             beat = beat.wrapping_add(1);
@@ -446,6 +487,29 @@ fn spawn_ticker(app: AppHandle) {
                 tasks::save(&state.dir.join("tasks.json"), &*state.tasks.lock().unwrap());
                 let _ = state.calendar_sync.send(()); // fetch the new day's events
                 let _ = app.emit("tasks-changed", ());
+            }
+            // Every five seconds: did you walk away mid-focus, or come back?
+            if beat % 25 == 0 {
+                let away_after = {
+                    let t = state.timer.lock().unwrap();
+                    (t.running && t.mode == Mode::Focus && t.tl.away > 0).then_some(t.tl.away)
+                };
+                if let Some(minutes) = away_after {
+                    let idle = widget::idle_time();
+                    if idle >= Duration::from_secs(minutes as u64 * 60) {
+                        state.with_timer(|t| t.pause_for_away(idle));
+                        away_paused = true;
+                        let _ = app
+                            .notification()
+                            .builder()
+                            .title("Focus paused")
+                            .body(format!("No keyboard or mouse for {minutes} min. It'll wait for you."))
+                            .show();
+                    }
+                } else if away_paused && widget::idle_time() < Duration::from_secs(5) {
+                    away_paused = false;
+                    widget::show(&app); // welcome back: the widget says why the timer stopped
+                }
             }
             let (snap, finished) = {
                 let mut t = state.timer.lock().unwrap();
@@ -457,11 +521,11 @@ fn spawn_ticker(app: AppHandle) {
                     if auto {
                         t.toggle();
                     }
-                    finished = Some((ended, t.mode));
+                    finished = Some((ended, t.mode, t.idea));
                 }
                 (t.snapshot(), finished)
             };
-            if let Some((ended, next)) = finished {
+            if let Some((ended, next, idea)) = finished {
                 state.sync_music();
                 if ended == Mode::Focus {
                     let minutes = state.timer.lock().unwrap().tl.focus;
@@ -470,7 +534,7 @@ fn spawn_ticker(app: AppHandle) {
                 }
                 state.sync_audio();
                 state.audio.chime();
-                notify(&app, ended, next);
+                notify(&app, ended, next, idea);
                 let _ = app.emit("phase-done", ended);
             }
             if last.as_ref() != Some(&snap) {
@@ -692,6 +756,28 @@ fn sound_set_muted(app: State<'_, App>, muted: bool) {
 }
 
 #[tauri::command]
+fn window_mini(window: tauri::WebviewWindow, app: State<'_, App>, on: bool) {
+    app.settings.lock().unwrap().mini = on;
+    app.save_settings();
+    widget::apply_size(window.app_handle(), &window, on);
+}
+
+/// Turns the global shortcuts on or off; returns a note if another app already uses one.
+#[tauri::command]
+fn shortcuts_set(handle: AppHandle, app: State<'_, App>, on: bool) -> Option<String> {
+    app.settings.lock().unwrap().shortcuts = on;
+    app.save_settings();
+    let error = widget::set_shortcuts(&handle, on);
+    *app.shortcut_error.lock().unwrap() = error.clone();
+    error
+}
+
+#[tauri::command]
+fn shortcuts_error(app: State<'_, App>) -> Option<String> {
+    app.shortcut_error.lock().unwrap().clone()
+}
+
+#[tauri::command]
 fn window_pin(window: tauri::WebviewWindow, app: State<'_, App>, pin: widget::Pin) {
     app.settings.lock().unwrap().pin = pin;
     app.save_settings();
@@ -704,6 +790,7 @@ pub fn run() {
         // Launching Pomodoro again just brings the running widget back.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| widget::show(app)))
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(widget::on_shortcut).build())
         .on_window_event(widget::on_window_event)
         .setup(|app| {
             let dir = app.path().app_config_dir()?;
@@ -726,9 +813,14 @@ pub fn run() {
                 now_playing: now_playing.clone(),
                 tray: OnceLock::new(),
                 quitting: AtomicBool::new(false),
+                shortcut_error: Mutex::new(None),
             });
             let tray = widget::build_tray(app.handle())?;
             let _ = app.state::<App>().tray.set(tray);
+            let state = app.state::<App>();
+            if state.settings.lock().unwrap().shortcuts {
+                *state.shortcut_error.lock().unwrap() = widget::set_shortcuts(app.handle(), true);
+            }
             widget::show(app.handle());
             music::spawn(app.handle().clone(), music_rx, now_playing);
             spawn_ticker(app.handle().clone());
@@ -763,6 +855,9 @@ pub fn run() {
             fade_out_set,
             sounds_custom,
             sounds_open_folder,
+            window_mini,
+            shortcuts_set,
+            shortcuts_error,
             window_pin
         ])
         .build(tauri::generate_context!())
@@ -794,10 +889,48 @@ mod tests {
         assert!(s.pin == widget::Pin::Desktop && s.window_pos == Some([100, 200]));
         assert!(s.fade_out && s.scenes.is_empty(), "new settings get their defaults");
     }
+
+    /// Walking away mid-focus pauses the timer and gives back the time you were gone.
+    #[test]
+    fn away_pause_returns_the_lost_minutes() {
+        let mut t = Timer::new(Timeline { focus: 25, ..Timeline::default() });
+        t.toggle();
+        t.ends_at = Some(Instant::now() + Duration::from_secs(10 * 60)); // 10 min left
+        t.pause_for_away(Duration::from_secs(6 * 60));
+        let snap = t.snapshot();
+        assert!(!snap.running);
+        assert_eq!(snap.away, 6);
+        assert!((955..=960).contains(&snap.remaining), "{}", snap.remaining); // 10 + 6 min back
+        t.toggle();
+        assert_eq!(t.snapshot().away, 0, "resuming clears the notice");
+
+        // Never gives back more than the whole session.
+        let mut t = Timer::new(Timeline::default());
+        t.toggle();
+        t.pause_for_away(Duration::from_secs(60 * 60));
+        assert_eq!(t.snapshot().remaining, 25 * 60);
+    }
+
+    #[test]
+    fn breaks_come_with_an_idea() {
+        let mut t = Timer::new(Timeline::default());
+        assert!(t.snapshot().idea.is_none());
+        t.advance(true);
+        assert!(t.snapshot().idea.is_some(), "short break has an idea");
+        t.advance(false);
+        assert!(t.snapshot().idea.is_none(), "focus doesn't");
+    }
 }
 
 #[cfg(test)]
 mod live {
+    /// Run by hand: shows how long Windows says you've been idle.
+    #[test]
+    #[ignore]
+    fn idle_time_reads() {
+        println!("idle for {:?}", super::widget::idle_time());
+    }
+
     /// Run by hand: checks the real settings file loads in this version (prints no values).
     #[test]
     #[ignore]
