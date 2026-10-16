@@ -99,7 +99,7 @@ folder (Sounds tab → Open folder) and that layer plays them, streamed from dis
 ## Releasing
 
 ```powershell
-powershell -File scriptselease.ps1 -Notes "What changed"
+powershell -File scripts\release.ps1 -Notes "What changed"
 ```
 
 The script builds a signed installer and publishes it to this repo's releases and to the public
