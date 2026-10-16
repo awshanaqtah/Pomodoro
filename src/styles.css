@@ -173,15 +173,6 @@ body[data-running="true"] .play .i-pause { display: block; }
 #mute[aria-pressed="true"] .i-muted { display: block; }
 
 /* --- mixer --- */
-.mixer {
-  position: relative;
-  z-index: 1;
-  margin: 16px 18px 0;
-  padding: 10px 12px 6px;
-  border-radius: 14px;
-  background: rgba(10, 18, 14, 0.45);
-  border: 1px solid var(--line);
-}
 .tabs {
   display: flex;
   gap: 4px;
@@ -200,7 +191,7 @@ body[data-running="true"] .play .i-pause { display: block; }
 .tabs button[aria-selected="true"] { background: var(--track); color: var(--text); }
 .layer {
   display: grid;
-  grid-template-columns: 18px 56px 1fr;
+  grid-template-columns: 18px 60px 1fr 8px;
   align-items: center;
   gap: 8px;
   height: 30px;
@@ -208,6 +199,8 @@ body[data-running="true"] .play .i-pause { display: block; }
   color: var(--muted);
 }
 .layer svg { width: 16px; height: 16px; color: var(--accent); }
+.layer .mine { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); visibility: hidden; }
+.layer.custom .mine { visibility: visible; }
 body[data-muted="true"] .layer { opacity: 0.45; }
 
 input[type="range"] {
@@ -260,6 +253,9 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px 
 /* --- timeline settings --- */
 #gear[aria-expanded="true"] { color: var(--accent); }
 .panel {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--track) transparent;
   position: absolute;
   inset: 46px 0 0;
   z-index: 2;
@@ -575,3 +571,68 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px 
 .music.off .music-btns { display: none; }
 .music.off:hover .music-title { color: var(--accent); }
 .panel h2.sub { margin-top: 8px; }
+
+/* --- sounds --- */
+.sounds { padding: 10px 18px 60px; gap: 8px; overflow-y: auto; scrollbar-width: none; }
+.layers { padding: 0 4px; }
+.layers .layer { height: 27px; }
+.scenes { display: flex; gap: 6px; }
+.scenes.quick {
+  position: relative;
+  z-index: 1;
+  margin: 14px 0 0;
+  padding: 0 18px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  /* fade the right edge so it's clear the row scrolls */
+  mask-image: linear-gradient(90deg, #000 calc(100% - 36px), transparent);
+}
+.scenes.full { flex-wrap: wrap; }
+.scene {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  height: 26px;
+  padding: 0 11px;
+  border-radius: 13px;
+  border: 1px solid var(--line);
+  font: inherit;
+  font-size: 11.5px;
+  white-space: nowrap;
+  color: var(--muted);
+  background: rgba(10, 18, 14, 0.45);
+}
+.scene:hover { color: var(--text); }
+.scene.on { color: var(--bg); border-color: transparent; background: var(--accent); }
+.scene .x { margin-left: 6px; opacity: 0.6; }
+.scene .x:hover { opacity: 1; }
+.scene.add-scene { border-style: dashed; }
+.scene-name {
+  width: 120px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 13px;
+  border: 1px solid var(--accent);
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.25);
+}
+.scene-name:focus { outline: none; }
+.own-sounds { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 12px; color: var(--muted); }
+.own-sounds span { flex: 1; }
+.own-sounds button { height: 26px; padding: 0 10px; border-radius: 8px; font: inherit; font-size: 11.5px; color: var(--text); background: var(--track); }
+.own-sounds button:hover { background: color-mix(in srgb, var(--accent) 25%, transparent); }
+.sounds .hint { margin: 0; }
+
+.now-playing {
+  position: relative;
+  z-index: 1;
+  margin: 12px 18px 0;
+  padding: 6px 10px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(10, 18, 14, 0.45);
+}
+.now-playing .music { margin: 0; padding: 0; border-top: 0; }

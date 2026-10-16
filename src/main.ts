@@ -64,6 +64,11 @@ interface Timeline {
   goal: number;
 }
 
+interface Scene {
+  name: string;
+  levels: number[];
+}
+
 interface Sound {
   focus_mix: number[];
   break_mix: number[];
@@ -71,33 +76,164 @@ interface Sound {
   timeline: Timeline;
   music: { follow: boolean; on_breaks: boolean };
   pin: "normal" | "top" | "desktop";
+  scenes: Scene[];
+  fade_out: boolean;
 }
 
+// Same order as the Rust engine, whose layer names are also the file names for your recordings.
+const LAYERS = [
+  {
+    name: "Rain",
+    icon: '<path d="M7 4.5 5.5 8M13 4.5 11.5 8M19 4.5 17.5 8M10 11l-1.5 3.5M16 11l-1.5 3.5M7 17.5 5.5 21M13 17.5 11.5 21" />',
+  },
+  {
+    name: "Fire",
+    icon: '<path d="M12 21c-3.9 0-6.5-2.6-6.5-6.2 0-3.4 2.6-5.3 3.6-8.8 2.2 1.5 3 3.4 3 5.2 1-.6 1.8-1.7 2-3 2 1.6 4.4 4 4.4 6.8 0 3.5-2.6 6-6.5 6Z" />',
+  },
+  { name: "Thunder", icon: '<path d="M13.5 3 6 13.5h5.5L10 21l8-11h-5.5l1-7Z" />' },
+  { name: "Wind", icon: '<path d="M3 8h11a3 3 0 1 0-3-3M3 12h15a3 3 0 1 1-3 3M3 16h7" />' },
+  {
+    name: "Stream",
+    icon: '<path d="M3 8c2 0 2-1.5 4.5-1.5S10 8 12 8s2-1.5 4.5-1.5S19 8 21 8M3 13c2 0 2-1.5 4.5-1.5S10 13 12 13s2-1.5 4.5-1.5S19 13 21 13M3 18c2 0 2-1.5 4.5-1.5S10 18 12 18s2-1.5 4.5-1.5S19 18 21 18" />',
+  },
+  {
+    name: "Ocean",
+    icon: '<path d="M2 16c2.5 0 3-2 5-2s2.5 2 5 2 3-2 5-2 2.5 2 5 2M2 20c2.5 0 3-2 5-2s2.5 2 5 2 3-2 5-2 2.5 2 5 2M5 12c.5-4 3.5-7 7.5-7 2 0 3.6.8 4.5 2-2.3-.4-4.3.8-4.8 3" />',
+  },
+  { name: "Crickets", icon: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z" />' },
+  { name: "Noise", title: "Brown noise: deep, even noise that covers voices and traffic", icon: '<path d="M3 12h2l2-5 3 10 3-12 3 14 2-7h3" />' },
+];
+
+const BUILT_IN_SCENES: Scene[] = [
+  { name: "Rainy cabin", levels: [0.6, 0.5, 0, 0, 0, 0, 0, 0] },
+  { name: "Storm night", levels: [0.75, 0, 0.55, 0.35, 0, 0, 0, 0] },
+  { name: "Forest stream", levels: [0, 0, 0, 0.2, 0.6, 0, 0.15, 0] },
+  { name: "Ocean", levels: [0, 0, 0, 0.25, 0, 0.7, 0, 0] },
+  { name: "Summer night", levels: [0, 0.3, 0, 0.15, 0, 0, 0.5, 0] },
+  { name: "Deep focus", levels: [0.2, 0, 0, 0, 0, 0, 0, 0.5] },
+  { name: "Silence", levels: [0, 0, 0, 0, 0, 0, 0, 0] },
+];
+
+const silentMix = () => LAYERS.map(() => 0);
 let sound: Sound = {
-  focus_mix: [0, 0, 0],
-  break_mix: [0, 0, 0],
+  focus_mix: silentMix(),
+  break_mix: silentMix(),
   muted: false,
   timeline: { focus: 25, short: 5, long: 15, cycles: 4, auto_breaks: true, auto_focus: false, goal: 8 },
   music: { follow: true, on_breaks: false },
   pin: "normal",
+  scenes: [],
+  fade_out: true,
 };
-let scope: Scope = "focus";
+let scope: Scope = "focus"; // the mix shown on the Sounds page
 let lastMode: Mode | undefined;
-const sliders = Array.from(document.querySelectorAll<HTMLInputElement>(".layer input"));
-const tabs = Array.from(document.querySelectorAll<HTMLButtonElement>(".tabs button"));
+let custom: boolean[] = []; // layers playing your own recording
+const layersEl = $("layers");
+const tabs = Array.from(document.querySelectorAll<HTMLButtonElement>(".sounds .tabs button"));
 const muteBtn = $("mute");
 
+layersEl.replaceChildren(
+  ...LAYERS.map((layer, i) => {
+    const row = document.createElement("label");
+    row.className = "layer";
+    if (layer.title) row.title = layer.title;
+    row.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${layer.icon}</svg><span>${layer.name}</span>
+      <input type="range" min="0" max="100" data-layer="${i}" aria-label="${layer.name}" />
+      <i class="mine" title="Playing your own recording"></i>`;
+    return row;
+  }),
+);
+const sliders = Array.from(layersEl.querySelectorAll<HTMLInputElement>("input"));
+const rows = Array.from(layersEl.querySelectorAll<HTMLElement>(".layer"));
+
 const paintSlider = (el: HTMLInputElement) => el.style.setProperty("--fill", `${el.value}%`);
+const mixFor = (s: Scope) => (s === "focus" ? sound.focus_mix : sound.break_mix);
+/** Scene buttons on the Timer page change whatever is playing now. */
+const liveScope = (): Scope => (lastMode === undefined || lastMode === "focus" ? "focus" : "break");
+const sameMix = (a: number[], b: number[]) => b.every((v, i) => Math.abs(v - (a[i] ?? 0)) < 0.005);
 
 function renderMixer() {
-  const mix = scope === "focus" ? sound.focus_mix : sound.break_mix;
+  const mix = mixFor(scope);
   sliders.forEach((el, i) => {
-    el.value = String(Math.round(mix[i] * 100));
+    el.value = String(Math.round((mix[i] ?? 0) * 100));
     paintSlider(el);
   });
+  rows.forEach((row, i) => row.classList.toggle("custom", !!custom[i]));
   tabs.forEach((t) => t.setAttribute("aria-selected", String(t.dataset.scope === scope)));
   muteBtn.setAttribute("aria-pressed", String(sound.muted));
   document.body.dataset.muted = String(sound.muted);
+  renderScenes();
+}
+
+function sceneChip(scene: Scene, target: Scope, removable: boolean): HTMLButtonElement {
+  const chip = document.createElement("button");
+  chip.className = `scene${sameMix(mixFor(target), scene.levels) ? " on" : ""}`;
+  chip.textContent = scene.name;
+  chip.addEventListener("click", () => applyScene(scene, target));
+  if (removable) {
+    const x = document.createElement("span");
+    x.className = "x";
+    x.textContent = "×";
+    x.title = `Delete "${scene.name}"`;
+    x.addEventListener("click", (e) => {
+      e.stopPropagation();
+      invoke<Scene[]>("scene_delete", { name: scene.name }).then((list) => {
+        sound.scenes = list;
+        renderScenes();
+      });
+    });
+    chip.append(x);
+  }
+  return chip;
+}
+
+function renderScenes() {
+  const quick = liveScope();
+  $("scenes-quick").replaceChildren(
+    ...[...BUILT_IN_SCENES, ...sound.scenes].map((sc) => sceneChip(sc, quick, false)),
+  );
+  const save = document.createElement("button");
+  save.className = "scene add-scene";
+  save.textContent = "+ Save this mix";
+  save.addEventListener("click", () => nameNewScene(save));
+  $("scenes-full").replaceChildren(
+    ...BUILT_IN_SCENES.map((sc) => sceneChip(sc, scope, false)),
+    ...sound.scenes.map((sc) => sceneChip(sc, scope, true)),
+    save,
+  );
+}
+
+function applyScene(scene: Scene, target: Scope) {
+  const levels = LAYERS.map((_, i) => scene.levels[i] ?? 0);
+  if (target === "focus") sound.focus_mix = levels;
+  else sound.break_mix = levels;
+  renderMixer();
+  invoke("sound_set_mix", { scope: target, levels });
+}
+
+function nameNewScene(button: HTMLButtonElement) {
+  const input = document.createElement("input");
+  input.className = "scene-name";
+  input.placeholder = "Name this mix";
+  input.maxLength = 24;
+  button.replaceWith(input);
+  input.focus();
+  let finished = false;
+  const finish = (save: boolean) => {
+    if (finished) return;
+    finished = true;
+    const name = input.value.trim();
+    if (!save || !name) return renderScenes();
+    invoke<Scene[]>("scene_save", { name, levels: mixFor(scope) }).then((list) => {
+      sound.scenes = list;
+      renderScenes();
+    });
+  };
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") finish(true);
+    else if (e.key === "Escape") finish(false);
+  });
+  input.addEventListener("blur", () => finish(true));
 }
 
 // Follow the timer: show the mix that is about to play whenever the phase changes.
@@ -111,8 +247,9 @@ function followMode(mode: Mode) {
 function setLevel(el: HTMLInputElement, save: boolean) {
   const layer = Number(el.dataset.layer);
   const value = Number(el.value) / 100;
-  (scope === "focus" ? sound.focus_mix : sound.break_mix)[layer] = value;
+  mixFor(scope)[layer] = value;
   paintSlider(el);
+  renderScenes();
   invoke("sound_set_level", { scope, layer, value, save });
 }
 
@@ -121,6 +258,13 @@ function setMuted(muted: boolean) {
   renderMixer();
   invoke("sound_set_muted", { muted });
 }
+
+/** Rescans the sounds folder; layers with a recording get a dot and play it. */
+const refreshCustom = () =>
+  invoke<boolean[]>("sounds_custom").then((flags) => {
+    custom = flags;
+    renderMixer();
+  });
 
 sliders.forEach((el) => {
   el.addEventListener("input", () => setLevel(el, false));
@@ -133,6 +277,17 @@ tabs.forEach((t) =>
   }),
 );
 muteBtn.addEventListener("click", () => setMuted(!sound.muted));
+$("sounds-folder").addEventListener("click", () => invoke("sounds_open_folder"));
+$("sounds-reload").addEventListener("click", refreshCustom);
+// The quick scene row scrolls sideways with the mouse wheel.
+$("scenes-quick").addEventListener(
+  "wheel",
+  (e) => {
+    e.preventDefault();
+    $("scenes-quick").scrollLeft += e.deltaY + e.deltaX;
+  },
+  { passive: false },
+);
 
 // --- your timeline ---
 
@@ -147,6 +302,7 @@ const flagInputs = Array.from(panel.querySelectorAll<HTMLInputElement>('input[ty
 function renderTimeline() {
   for (const el of numberInputs) el.value = String(sound.timeline[el.dataset.key as NumberKey]);
   for (const el of flagInputs) el.checked = sound.timeline[el.dataset.key as FlagKey];
+  fadeBox.checked = sound.fade_out;
   followBox.checked = sound.music.follow;
   breaksBox.checked = sound.music.on_breaks;
   breaksBox.disabled = !sound.music.follow;
@@ -193,6 +349,7 @@ const pageTabs = Array.from(document.querySelectorAll<HTMLButtonElement>(".pages
 const pages = Array.from(document.querySelectorAll<HTMLElement>(".page"));
 
 function showPage(name: string) {
+  if (name === "sounds") refreshCustom();
   pageTabs.forEach((t) => t.setAttribute("aria-selected", String(t.dataset.page === name)));
   pages.forEach((p) => (p.hidden = p.dataset.page !== name));
 }
@@ -483,6 +640,11 @@ interface NowPlaying {
 const musicEl = $("music");
 const musicArt = $<HTMLImageElement>("music-art");
 const followBox = $<HTMLInputElement>("music-follow");
+const fadeBox = $<HTMLInputElement>("fade-out");
+fadeBox.addEventListener("change", () => {
+  sound.fade_out = fadeBox.checked;
+  invoke("fade_out_set", { on: fadeBox.checked });
+});
 const breaksBox = $<HTMLInputElement>("music-breaks");
 
 function renderMusic(n: NowPlaying) {
@@ -573,5 +735,6 @@ invoke<Sound>("sound_state").then((s) => {
   sound = s;
   renderMixer();
   renderPin(s.pin);
+  refreshCustom();
   loadProgress();
 });

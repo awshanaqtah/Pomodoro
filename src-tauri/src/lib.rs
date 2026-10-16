@@ -4,13 +4,13 @@ mod music;
 mod tasks;
 mod widget;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Sender};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use audio::{Audio, LAYERS};
+use audio::{Audio, LAYERS, LAYER_NAMES};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tasks::{History, Kind, Session, Tasks};
@@ -167,9 +167,15 @@ impl Timer {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 struct Settings {
+    #[serde(deserialize_with = "mix_from_any")]
     focus_mix: [f32; LAYERS],
+    #[serde(deserialize_with = "mix_from_any")]
     break_mix: [f32; LAYERS],
     muted: bool,
+    /// Your saved sound scenes (the built-in ones live in the UI).
+    scenes: Vec<Scene>,
+    /// Ambience fades down over the last minute of focus, so the chime doesn't jolt you.
+    fade_out: bool,
     timeline: Timeline,
     /// Private iCal link. Stays on this PC.
     calendar_url: Option<String>,
@@ -179,6 +185,47 @@ struct Settings {
     window_pos: Option<[i32; 2]>,
     /// The "still running in the tray" notice is shown once.
     tray_hint_shown: bool,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct Scene {
+    name: String,
+    #[serde(deserialize_with = "mix_from_any")]
+    levels: [f32; LAYERS],
+}
+
+/// Mixes saved by older versions have fewer layers; the missing ones start silent.
+fn mix_from_any<'de, D: serde::Deserializer<'de>>(d: D) -> Result<[f32; LAYERS], D::Error> {
+    let saved = Vec::<f32>::deserialize(d)?;
+    let mut mix = [0.0; LAYERS];
+    for (slot, v) in mix.iter_mut().zip(saved) {
+        *slot = v.clamp(0.0, 1.0);
+    }
+    Ok(mix)
+}
+
+fn mix_from_slice(levels: &[f32]) -> [f32; LAYERS] {
+    std::array::from_fn(|i| levels.get(i).copied().unwrap_or(0.0).clamp(0.0, 1.0))
+}
+
+/// Your recordings live in `<config>/sounds/` and are named after their layer: `rain.mp3`, `fire.ogg`...
+fn custom_sounds(dir: &Path) -> [Option<PathBuf>; LAYERS] {
+    let files: Vec<PathBuf> = std::fs::read_dir(dir.join("sounds"))
+        .map(|entries| entries.filter_map(|e| e.ok().map(|e| e.path())).collect())
+        .unwrap_or_default();
+    let playable = |p: &PathBuf| {
+        p.extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| ["mp3", "ogg", "wav", "flac"].contains(&e.to_ascii_lowercase().as_str()))
+    };
+    std::array::from_fn(|i| {
+        files
+            .iter()
+            .find(|p| {
+                playable(p) && p.file_stem().and_then(|s| s.to_str()).is_some_and(|s| s.eq_ignore_ascii_case(LAYER_NAMES[i]))
+            })
+            .cloned()
+    })
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
@@ -199,9 +246,11 @@ impl Default for MusicSettings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            focus_mix: [0.6, 0.45, 0.0],
-            break_mix: [0.5, 0.0, 0.35],
+            focus_mix: [0.6, 0.45, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            break_mix: [0.5, 0.0, 0.35, 0.0, 0.0, 0.0, 0.0, 0.0],
             muted: false,
+            scenes: Vec::new(),
+            fade_out: true,
             timeline: Timeline::default(),
             calendar_url: None,
             music: MusicSettings::default(),
@@ -242,16 +291,21 @@ struct CalendarStatus {
 impl App {
     /// Ambience plays only while the timer runs, using the mix for the current phase.
     fn sync_audio(&self) {
-        let (mode, running) = {
+        let (mode, running, left) = {
             let t = self.timer.lock().unwrap();
-            (t.mode, t.running)
+            (t.mode, t.running, t.left())
         };
         let s = self.settings.lock().unwrap();
-        let levels = match (running && !s.muted, mode) {
+        let mut levels = match (running && !s.muted, mode) {
             (false, _) => [0.0; LAYERS],
             (true, Mode::Focus) => s.focus_mix,
             (true, _) => s.break_mix,
         };
+        // Over the last minute of focus the ambience settles down to a fifth, then the chime.
+        if s.fade_out && running && mode == Mode::Focus && left < Duration::from_secs(60) {
+            let k = 0.2 + 0.8 * left.as_secs_f32() / 60.0;
+            levels.iter_mut().for_each(|v| *v *= k);
+        }
         self.audio.set_targets(levels);
     }
 
@@ -420,6 +474,9 @@ fn spawn_ticker(app: AppHandle) {
                 let _ = app.emit("phase-done", ended);
             }
             if last.as_ref() != Some(&snap) {
+                if snap.running && snap.mode == Mode::Focus && snap.remaining <= 61 {
+                    state.sync_audio(); // the last-minute fade
+                }
                 let _ = app.emit("tick", snap.clone());
                 if let Some(tray) = state.tray.get() {
                     widget::update_tray(tray, &snap, last.as_ref());
@@ -570,6 +627,62 @@ fn sound_set_level(app: State<'_, App>, scope: String, layer: usize, value: f32,
     }
 }
 
+/// Sets a whole mix at once, e.g. from a scene.
+#[tauri::command]
+fn sound_set_mix(app: State<'_, App>, scope: String, levels: Vec<f32>) {
+    {
+        let mut s = app.settings.lock().unwrap();
+        let mix = mix_from_slice(&levels);
+        if scope == "focus" { s.focus_mix = mix } else { s.break_mix = mix }
+    }
+    app.sync_audio();
+    app.save_settings();
+}
+
+#[tauri::command]
+fn scene_save(app: State<'_, App>, name: String, levels: Vec<f32>) -> Vec<Scene> {
+    let name: String = name.trim().chars().take(24).collect();
+    {
+        let mut s = app.settings.lock().unwrap();
+        if !name.is_empty() {
+            s.scenes.retain(|sc| sc.name != name);
+            s.scenes.push(Scene { name, levels: mix_from_slice(&levels) });
+        }
+    }
+    app.save_settings();
+    app.settings.lock().unwrap().scenes.clone()
+}
+
+#[tauri::command]
+fn scene_delete(app: State<'_, App>, name: String) -> Vec<Scene> {
+    app.settings.lock().unwrap().scenes.retain(|sc| sc.name != name);
+    app.save_settings();
+    app.settings.lock().unwrap().scenes.clone()
+}
+
+#[tauri::command]
+fn fade_out_set(app: State<'_, App>, on: bool) {
+    app.settings.lock().unwrap().fade_out = on;
+    app.save_settings();
+    app.sync_audio();
+}
+
+/// Rescans the sounds folder, swaps layers to match, and says which layers use your recordings.
+#[tauri::command]
+fn sounds_custom(app: State<'_, App>) -> Vec<bool> {
+    let custom = custom_sounds(&app.dir);
+    let flags = custom.iter().map(Option::is_some).collect();
+    app.audio.set_custom(custom);
+    flags
+}
+
+#[tauri::command]
+fn sounds_open_folder(app: State<'_, App>) {
+    let folder = app.dir.join("sounds");
+    let _ = std::fs::create_dir_all(&folder);
+    let _ = std::process::Command::new("explorer.exe").arg(&folder).spawn();
+}
+
 #[tauri::command]
 fn sound_set_muted(app: State<'_, App>, muted: bool) {
     app.set_muted(muted);
@@ -595,6 +708,7 @@ pub fn run() {
         .setup(|app| {
             let dir = app.path().app_config_dir()?;
             let settings: Settings = tasks::load(&dir.join("settings.json"));
+            let custom = custom_sounds(&dir);
             let (calendar_sync, calendar_wake) = mpsc::channel();
             let (music_tx, music_rx) = mpsc::channel();
             let now_playing = Arc::new(Mutex::new(music::NowPlaying::default()));
@@ -605,7 +719,7 @@ pub fn run() {
                 tasks: Mutex::new(tasks::load(&dir.join("tasks.json"))),
                 history: Mutex::new(tasks::load(&dir.join("history.json"))),
                 dir,
-                audio: Audio::start(),
+                audio: Audio::start(custom),
                 calendar: Mutex::new(CalendarStatus::default()),
                 calendar_sync,
                 music: music_tx,
@@ -643,6 +757,12 @@ pub fn run() {
             sound_state,
             sound_set_level,
             sound_set_muted,
+            sound_set_mix,
+            scene_save,
+            scene_delete,
+            fade_out_set,
+            sounds_custom,
+            sounds_open_folder,
             window_pin
         ])
         .build(tauri::generate_context!())
@@ -653,4 +773,45 @@ pub fn run() {
                 api.prevent_exit();
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Settings saved by 0.2 (three sound layers) must load whole: nothing resets on upgrade.
+    #[test]
+    fn old_settings_upgrade_without_losing_anything() {
+        let saved = r#"{"focus_mix":[0.6,0.45,0.0],"break_mix":[0.5,0.0,0.35],"muted":true,
+            "calendar_url":"https://calendar.example/basic.ics","timeline":{"focus":50,"goal":6},
+            "pin":"desktop","window_pos":[100,200],"tray_hint_shown":true}"#;
+        let s: Settings = serde_json::from_str(saved).unwrap();
+        assert_eq!(s.focus_mix, [0.6, 0.45, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        assert_eq!(s.break_mix[2], 0.35);
+        assert!(s.muted);
+        assert_eq!(s.calendar_url.as_deref(), Some("https://calendar.example/basic.ics"));
+        assert_eq!((s.timeline.focus, s.timeline.goal, s.timeline.short), (50, 6, 5));
+        assert!(s.pin == widget::Pin::Desktop && s.window_pos == Some([100, 200]));
+        assert!(s.fade_out && s.scenes.is_empty(), "new settings get their defaults");
+    }
+}
+
+#[cfg(test)]
+mod live {
+    /// Run by hand: checks the real settings file loads in this version (prints no values).
+    #[test]
+    #[ignore]
+    fn real_settings_load() {
+        let path = std::path::PathBuf::from(std::env::var("APPDATA").unwrap())
+            .join("com.awshanaqtah.pomodoro")
+            .join("settings.json");
+        let text = std::fs::read_to_string(path).unwrap();
+        let s: super::Settings = serde_json::from_str(&text).expect("settings load");
+        println!(
+            "loaded: calendar linked: {}, focus {} min, layers in focus mix: {}",
+            s.calendar_url.is_some(),
+            s.timeline.focus,
+            s.focus_mix.len()
+        );
+    }
 }

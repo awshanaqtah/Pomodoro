@@ -38,6 +38,7 @@
 
       <nav class="pages" role="tablist">
         <button role="tab" data-page="timer" aria-selected="true">Timer</button>
+        <button role="tab" data-page="sounds" aria-selected="false">Sounds</button>
         <button role="tab" data-page="tasks" aria-selected="false">Tasks <span class="count" id="task-count"></span></button>
         <button role="tab" data-page="progress" aria-selected="false">Progress</button>
       </nav>
@@ -70,26 +71,9 @@
         </button>
       </nav>
 
-      <section class="mixer" aria-label="Ambience mix">
-        <div class="tabs" role="tablist">
-          <button role="tab" data-scope="focus" aria-selected="true">Focus mix</button>
-          <button role="tab" data-scope="break" aria-selected="false">Break mix</button>
-        </div>
-        <label class="layer">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5 5.5 8M13 4.5 11.5 8M19 4.5 17.5 8M10 11l-1.5 3.5M16 11l-1.5 3.5M7 17.5 5.5 21M13 17.5 11.5 21" /></svg>
-          <span>Rain</span>
-          <input type="range" min="0" max="100" data-layer="0" />
-        </label>
-        <label class="layer">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21c-3.9 0-6.5-2.6-6.5-6.2 0-3.4 2.6-5.3 3.6-8.8 2.2 1.5 3 3.4 3 5.2 1-.6 1.8-1.7 2-3 2 1.6 4.4 4 4.4 6.8 0 3.5-2.6 6-6.5 6Z" /></svg>
-          <span>Fire</span>
-          <input type="range" min="0" max="100" data-layer="1" />
-        </label>
-        <label class="layer">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.5 3 6 13.5h5.5L10 21l8-11h-5.5l1-7Z" /></svg>
-          <span>Thunder</span>
-          <input type="range" min="0" max="100" data-layer="2" />
-        </label>
+      <section class="scenes quick" id="scenes-quick" aria-label="Sound scenes"></section>
+
+      <section class="now-playing">
         <div class="music off" id="music" title="Open Spotify">
           <div class="art">
             <img id="music-art" alt="" hidden />
@@ -113,6 +97,21 @@
           </div>
         </div>
       </section>
+      </div>
+
+      <div class="page sounds" data-page="sounds" hidden>
+        <div class="tabs" role="tablist">
+          <button role="tab" data-scope="focus" aria-selected="true">Focus mix</button>
+          <button role="tab" data-scope="break" aria-selected="false">Break mix</button>
+        </div>
+        <div class="scenes full" id="scenes-full"></div>
+        <div class="layers" id="layers"></div>
+        <div class="own-sounds">
+          <span>Your own recordings</span>
+          <button id="sounds-folder">Open folder</button>
+          <button id="sounds-reload">Reload</button>
+        </div>
+        <p class="hint">Name a file after its layer, like rain.mp3, fire.ogg or ocean.wav, and it plays instead of the built-in sound.</p>
       </div>
 
       <div class="page tasks" data-page="tasks" hidden>
@@ -206,7 +205,8 @@
         </div>
         <label class="switch"><input type="checkbox" data-key="auto_breaks" /> <span>Start breaks automatically</span></label>
         <label class="switch"><input type="checkbox" data-key="auto_focus" /> <span>Start focus automatically</span></label>
-        <h2 class="sub">Music</h2>
+        <h2 class="sub">Sound &amp; music</h2>
+        <label class="switch"><input type="checkbox" id="fade-out" /> <span>Fade sounds out in the last minute</span></label>
         <label class="switch"><input type="checkbox" id="music-follow" /> <span>Spotify plays while you focus</span></label>
         <label class="switch"><input type="checkbox" id="music-breaks" /> <span>Keep it playing on breaks</span></label>
         <p class="hint">Changes to a phase that's already running apply from the next phase.</p>

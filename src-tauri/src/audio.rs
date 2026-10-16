@@ -1,22 +1,38 @@
-//! Ambience engine: rain, fire and thunder are synthesized live, so there are no
-//! audio files to ship or decode. A cpal stream runs one mixer callback; when
-//! every layer has faded to silence the stream is paused to cost zero CPU.
+//! Ambience engine. Eight layers (rain, fire, thunder, wind, stream, ocean, crickets and brown
+//! noise) are synthesized live, so nothing ships as audio files, and any layer can be swapped for
+//! your own recording, streamed from disk. A cpal stream runs one mixer callback; when every layer
+//! has faded to silence the stream is paused to cost zero CPU.
 
-use std::f32::consts::TAU;
+use std::f32::consts::{PI, TAU};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
-pub const LAYERS: usize = 3; // rain, fire, thunder
+pub const LAYERS: usize = 8;
+
+/// Layer names, which are also the file names for your own recordings (`rain.mp3`, `fire.ogg`, ...).
+pub const LAYER_NAMES: [&str; LAYERS] = ["rain", "fire", "thunder", "wind", "stream", "ocean", "crickets", "brown"];
 
 /// Per-layer trim so every slider at 100% sits around -18 dBFS RMS: ambience, not foreground.
 /// Measured with the `layer_levels` test.
-const TRIM: [f32; LAYERS] = [0.5, 0.5, 0.75];
+const TRIM: [f32; LAYERS] = [0.5, 0.5, 0.75, 0.44, 0.33, 0.36, 1.3, 0.6];
 
-/// Lock-free state shared between the app and the audio callback.
+/// Recordings are usually mastered loud; this brings them near the synthesized layers.
+const FILE_TRIM: f32 = 0.5;
+
+/// One ambience source producing stereo samples.
+trait Layer: Send {
+    fn next(&mut self) -> (f32, f32);
+}
+
+/// A replacement layer for the running mixer: (index, layer, trim).
+type Swap = (usize, Box<dyn Layer>, f32);
+
+/// State shared between the app and the audio callback.
 struct Shared {
     targets: [AtomicU32; LAYERS], // f32 bits, 0.0..=1.0
     chime: AtomicBool,
@@ -24,6 +40,10 @@ struct Shared {
     idle: AtomicBool,
     /// Set when Windows invalidates the stream, e.g. the default output device changed.
     broken: AtomicBool,
+    /// Your recordings by layer; read whenever a stream opens.
+    custom: Mutex<[Option<PathBuf>; LAYERS]>,
+    /// The running mixer's sample rate and swap inbox, replaced when the stream is rebuilt.
+    live: Mutex<Option<(f32, Sender<Swap>)>>,
 }
 
 impl Shared {
@@ -41,12 +61,14 @@ pub struct Audio {
 impl Audio {
     /// Starts the audio thread. With no output device the app keeps working silently
     /// and retries every few seconds, so plugging in headphones later still works.
-    pub fn start() -> Self {
+    pub fn start(custom: [Option<PathBuf>; LAYERS]) -> Self {
         let shared = Arc::new(Shared {
             targets: Default::default(),
             chime: AtomicBool::new(false),
             idle: AtomicBool::new(true),
             broken: AtomicBool::new(false),
+            custom: Mutex::new(custom),
+            live: Mutex::new(None),
         });
         let (tx, rx) = mpsc::channel::<()>();
         let (thread_shared, thread_tx) = (shared.clone(), tx.clone());
@@ -63,6 +85,23 @@ impl Audio {
         }
     }
 
+    /// Swaps layers between synthesized and your recordings, only where something changed.
+    pub fn set_custom(&self, custom: [Option<PathBuf>; LAYERS]) {
+        let changed: Vec<usize> = {
+            let mut current = self.shared.custom.lock().unwrap();
+            let changed = (0..LAYERS).filter(|&i| current[i] != custom[i]).collect();
+            *current = custom.clone();
+            changed
+        };
+        let live = self.shared.live.lock().unwrap().clone();
+        if let Some((sr, inbox)) = live {
+            let mut rng = Rng::seeded();
+            for i in changed {
+                let _ = inbox.send(make_layer(i, sr, &mut rng, custom[i].as_deref()));
+            }
+        }
+    }
+
     pub fn chime(&self) {
         self.shared.chime.store(true, Ordering::Relaxed);
         self.wake();
@@ -72,6 +111,24 @@ impl Audio {
         self.shared.idle.store(false, Ordering::Relaxed);
         let _ = self.wake.send(());
     }
+}
+
+/// Builds layer `i`: your recording if there is a playable one, otherwise the synthesized sound.
+fn make_layer(i: usize, sr: f32, rng: &mut Rng, custom: Option<&Path>) -> Swap {
+    if let Some(layer) = custom.and_then(|path| FileLayer::open(path, sr)) {
+        return (i, Box::new(layer), FILE_TRIM);
+    }
+    let layer: Box<dyn Layer> = match i {
+        0 => Box::new(Rain::new(sr, rng.fork())),
+        1 => Box::new(Fire::new(sr, rng.fork())),
+        2 => Box::new(Thunder::new(sr, rng.fork())),
+        3 => Box::new(Wind::new(sr, rng.fork())),
+        4 => Box::new(Stream::new(sr, rng.fork())),
+        5 => Box::new(Ocean::new(sr, rng.fork())),
+        6 => Box::new(Crickets::new(sr, rng.fork())),
+        _ => Box::new(BrownNoise::new(sr, rng.fork())),
+    };
+    (i, layer, TRIM[i])
 }
 
 /// Owns the cpal stream: plays it on demand, pauses it when silent, rebuilds it when it breaks.
@@ -103,7 +160,15 @@ fn open_stream(shared: Arc<Shared>, tx: Sender<()>) -> Option<cpal::Stream> {
     let format = supported.sample_format();
     let config: cpal::StreamConfig = supported.into();
     let channels = config.channels as usize;
-    let mut mixer = Mixer::new(config.sample_rate as f32, shared.clone());
+    let sr = config.sample_rate as f32;
+
+    let mut rng = Rng::seeded();
+    let custom = shared.custom.lock().unwrap().clone();
+    let layers = (0..LAYERS).map(|i| make_layer(i, sr, &mut rng, custom[i].as_deref())).collect();
+    let (inbox, swaps) = mpsc::channel();
+    *shared.live.lock().unwrap() = Some((sr, inbox));
+    let mut mixer = Mixer::new(sr, shared.clone(), layers, swaps);
+
     let err = move |e: cpal::Error| {
         eprintln!("audio stream error: {e}");
         if matches!(e.kind(), cpal::ErrorKind::StreamInvalidated | cpal::ErrorKind::DeviceNotAvailable) {
@@ -143,29 +208,38 @@ fn open_stream(shared: Arc<Shared>, tx: Sender<()>) -> Option<cpal::Stream> {
 struct Mixer {
     shared: Arc<Shared>,
     gains: [f32; LAYERS],
+    trims: [f32; LAYERS],
+    layers: Vec<Box<dyn Layer>>,
+    swaps: Receiver<Swap>,
     fade: f32,
-    rain: Rain,
-    fire: Fire,
-    thunder: Thunder,
     chime: Chime,
 }
 
 impl Mixer {
-    fn new(sr: f32, shared: Arc<Shared>) -> Self {
-        let mut rng = Rng::seeded();
+    fn new(sr: f32, shared: Arc<Shared>, initial: Vec<Swap>, swaps: Receiver<Swap>) -> Self {
+        let mut trims = [1.0; LAYERS];
+        let mut layers = Vec::with_capacity(LAYERS);
+        for (i, layer, trim) in initial {
+            trims[i] = trim;
+            layers.push(layer);
+        }
         Self {
             shared,
             gains: [0.0; LAYERS],
+            trims,
+            layers,
+            swaps,
             // ~0.8 s time constant: slow enough to feel like a fade, not a switch.
             fade: 1.0 - (-1.0 / (0.8 * sr)).exp(),
-            rain: Rain::new(sr, rng.fork()),
-            fire: Fire::new(sr, rng.fork()),
-            thunder: Thunder::new(sr, rng.fork()),
             chime: Chime::new(sr),
         }
     }
 
     fn fill<T: Copy>(&mut self, out: &mut [T], channels: usize, conv: impl Fn(f32) -> T) {
+        while let Ok((i, layer, trim)) = self.swaps.try_recv() {
+            self.layers[i] = layer;
+            self.trims[i] = trim;
+        }
         let targets = self.shared.targets.each_ref().map(|t| f32::from_bits(t.load(Ordering::Relaxed)));
         if self.shared.chime.swap(false, Ordering::Relaxed) {
             self.chime.trigger();
@@ -180,12 +254,8 @@ impl Mixer {
                     *g = 0.0;
                     continue; // silent layers cost nothing
                 }
-                let (a, b) = match i {
-                    0 => self.rain.next(),
-                    1 => self.fire.next(),
-                    _ => self.thunder.next(),
-                };
-                let g = *g * TRIM[i];
+                let (a, b) = self.layers[i].next();
+                let g = *g * self.trims[i];
                 l += a * g;
                 r += b * g;
             }
@@ -542,6 +612,467 @@ impl Thunder {
     }
 }
 
+impl Layer for Rain {
+    fn next(&mut self) -> (f32, f32) {
+        Rain::next(self)
+    }
+}
+
+impl Layer for Fire {
+    fn next(&mut self) -> (f32, f32) {
+        Fire::next(self)
+    }
+}
+
+impl Layer for Thunder {
+    fn next(&mut self) -> (f32, f32) {
+        Thunder::next(self)
+    }
+}
+
+/// tan(x) for the small angles of cutoffs well below Nyquist; within 0.5% up to x = 0.65.
+fn tan_small(x: f32) -> f32 {
+    x * (1.0 + x * x * (1.0 / 3.0 + x * x * (2.0 / 15.0)))
+}
+
+/// Zero-delay-feedback state-variable filter (Andrew Simper's form), cheap enough to sweep its
+/// cutoff every sample. `run` returns (low-pass, band-pass).
+#[derive(Clone, Copy, Default)]
+struct Svf {
+    ic1: f32,
+    ic2: f32,
+}
+
+impl Svf {
+    fn run(&mut self, x: f32, cutoff: f32, q: f32, sr: f32) -> (f32, f32) {
+        let g = tan_small(PI * cutoff.min(sr * 0.2) / sr);
+        let k = 1.0 / q;
+        let a1 = 1.0 / (1.0 + g * (g + k));
+        let a2 = g * a1;
+        let a3 = g * a2;
+        let v3 = x - self.ic2;
+        let v1 = a1 * self.ic1 + a2 * v3;
+        let v2 = self.ic2 + a2 * self.ic1 + a3 * v3;
+        self.ic1 = 2.0 * v1 - self.ic1;
+        self.ic2 = 2.0 * v2 - self.ic2;
+        (v2, v1)
+    }
+}
+
+// ---------------------------------------------------------------- wind
+
+/// Gusts of filtered noise. Stronger gusts whistle higher, and each ear wanders a little apart.
+struct Wind {
+    sr: f32,
+    rng: Rng,
+    gust: Drift,
+    ch: [WindChannel; 2],
+}
+
+struct WindChannel {
+    pink: Pink,
+    svf: Svf,
+    wobble: Drift,
+    rumble: OnePole,
+}
+
+impl Wind {
+    fn new(sr: f32, rng: Rng) -> Self {
+        let ch = || WindChannel {
+            pink: Pink::default(),
+            svf: Svf::default(),
+            wobble: Drift::new(0.8, 1.25, 1.2, sr),
+            rumble: OnePole::new(120.0, sr),
+        };
+        Self { sr, rng, gust: Drift::new(0.15, 1.0, 3.0, sr), ch: [ch(), ch()] }
+    }
+}
+
+impl Layer for Wind {
+    fn next(&mut self) -> (f32, f32) {
+        let gust = self.gust.next(&mut self.rng);
+        let mut out = [0.0; 2];
+        for (c, o) in self.ch.iter_mut().zip(out.iter_mut()) {
+            let noise = c.pink.next(self.rng.bi());
+            let cutoff = (180.0 + 650.0 * gust * gust) * c.wobble.next(&mut self.rng);
+            let (_, band) = c.svf.run(noise, cutoff, 1.8, self.sr);
+            *o = band * (0.35 + 1.2 * gust) + c.rumble.lp(noise) * 0.4 * gust;
+        }
+        (out[0], out[1])
+    }
+}
+
+// ---------------------------------------------------------------- stream
+
+/// A brook: a soft bed of rushing water plus bubbling, where narrow filters hop between random
+/// pitches every few milliseconds.
+struct Stream {
+    sr: f32,
+    rng: Rng,
+    bed: [(OnePole, OnePole); 2],
+    bubbles: [Bubble; 4],
+    glide: f32,
+    swell: f32,
+}
+
+struct Bubble {
+    svf: Svf,
+    cutoff: f32,
+    goal: f32,
+    amp: f32,
+    amp_goal: f32,
+    hold: u32,
+    pan: f32,
+}
+
+impl Stream {
+    fn new(sr: f32, mut rng: Rng) -> Self {
+        let bubble = |rng: &mut Rng| Bubble {
+            svf: Svf::default(),
+            cutoff: 800.0,
+            goal: 800.0,
+            amp: 0.0,
+            amp_goal: 0.0,
+            hold: 0,
+            pan: rng.bi() * 0.7,
+        };
+        let bubbles = [bubble(&mut rng), bubble(&mut rng), bubble(&mut rng), bubble(&mut rng)];
+        let bed = || (OnePole::new(1400.0, sr), OnePole::new(200.0, sr));
+        Self {
+            sr,
+            rng,
+            bed: [bed(), bed()],
+            bubbles,
+            glide: 1.0 - decay(0.003, sr),
+            swell: 1.0 - decay(0.02, sr),
+        }
+    }
+}
+
+impl Layer for Stream {
+    fn next(&mut self) -> (f32, f32) {
+        let mut out = [0.0; 2];
+        for ((lp, hp), o) in self.bed.iter_mut().zip(out.iter_mut()) {
+            *o = hp.hp(lp.lp(self.rng.bi())) * 0.5;
+        }
+        for b in &mut self.bubbles {
+            if b.hold == 0 {
+                let r = self.rng.f();
+                b.goal = 350.0 + 2300.0 * r * r;
+                b.amp_goal = if self.rng.f() < 0.25 { 0.0 } else { 0.3 + 0.7 * self.rng.f() };
+                b.hold = ((0.006 + 0.03 * self.rng.f()) * self.sr) as u32;
+            }
+            b.hold -= 1;
+            b.cutoff += (b.goal - b.cutoff) * self.glide;
+            b.amp += (b.amp_goal - b.amp) * self.swell;
+            let (_, band) = b.svf.run(self.rng.bi(), b.cutoff, 6.0, self.sr);
+            let s = band * b.amp;
+            out[0] += s * (1.0 - b.pan.max(0.0));
+            out[1] += s * (1.0 + b.pan.min(0.0));
+        }
+        (out[0], out[1])
+    }
+}
+
+// ---------------------------------------------------------------- ocean
+
+/// Waves: every 7–13 s a swell builds, breaks into bright foam, then washes back out, arriving
+/// a little from the left or the right.
+struct Ocean {
+    sr: f32,
+    rng: Rng,
+    t: u32,
+    len: u32,
+    peak: f32,
+    crest: f32,
+    pan: f32,
+    ch: [(Pink, Brown, Svf); 2],
+}
+
+impl Ocean {
+    fn new(sr: f32, rng: Rng) -> Self {
+        let mut ocean = Self { sr, rng, t: 0, len: 1, peak: 0.0, crest: 0.5, pan: 0.0, ch: Default::default() };
+        ocean.next_wave();
+        ocean.t = ocean.len / 3; // start mid-swell, not in silence
+        ocean
+    }
+
+    fn next_wave(&mut self) {
+        self.t = 0;
+        self.len = ((7.0 + 6.0 * self.rng.f()) * self.sr) as u32;
+        self.peak = 0.6 + 0.4 * self.rng.f();
+        self.crest = 0.4 + 0.2 * self.rng.f();
+        self.pan = self.rng.bi() * 0.4;
+    }
+
+    fn envelope(&self) -> f32 {
+        let p = self.t as f32 / self.len as f32;
+        let shape = if p < self.crest {
+            let x = p / self.crest;
+            x * x * (3.0 - 2.0 * x)
+        } else {
+            (-(p - self.crest) * 7.0).exp()
+        };
+        0.12 + shape * self.peak
+    }
+}
+
+impl Layer for Ocean {
+    fn next(&mut self) -> (f32, f32) {
+        if self.t >= self.len {
+            self.next_wave();
+        }
+        self.t += 1;
+        let e = self.envelope();
+        let cutoff = 220.0 + 3000.0 * e * e;
+        let mut out = [0.0; 2];
+        for ((pink, brown, svf), o) in self.ch.iter_mut().zip(out.iter_mut()) {
+            let w = self.rng.bi();
+            let noise = pink.next(w) * 0.7 + brown.next(w) * 0.5;
+            let (low, _) = svf.run(noise, cutoff, 0.8, self.sr);
+            *o = low * (0.25 + 1.3 * e);
+        }
+        (out[0] * (1.0 - self.pan.max(0.0)), out[1] * (1.0 + self.pan.min(0.0)))
+    }
+}
+
+// ---------------------------------------------------------------- crickets
+
+/// A few crickets, each with its own pitch and rhythm, over a faint night breeze.
+struct Crickets {
+    sr: f32,
+    rng: Rng,
+    bugs: [Cricket; 3],
+    air: [(Pink, OnePole); 2],
+}
+
+struct Cricket {
+    freq: f32,
+    phase: f32,
+    t: u32,
+    period: u32,
+    pulses: u32,
+    pulse_len: u32,
+    amp: f32,
+    pan: f32,
+    resting: u32,
+}
+
+impl Crickets {
+    fn new(sr: f32, mut rng: Rng) -> Self {
+        let bug = |rng: &mut Rng| Cricket {
+            freq: 4200.0 + 1200.0 * rng.f(),
+            phase: 0.0,
+            t: (rng.f() * sr * 0.4) as u32,
+            period: ((0.45 + 0.45 * rng.f()) * sr) as u32,
+            pulses: 3 + (rng.f() * 3.0) as u32,
+            pulse_len: (sr / (25.0 + 15.0 * rng.f())) as u32,
+            amp: 0.25 + 0.15 * rng.f(),
+            pan: rng.bi() * 0.7,
+            resting: 0,
+        };
+        let bugs = [bug(&mut rng), bug(&mut rng), bug(&mut rng)];
+        let air = || (Pink::default(), OnePole::new(400.0, sr));
+        Self { sr, rng, bugs, air: [air(), air()] }
+    }
+}
+
+impl Layer for Crickets {
+    fn next(&mut self) -> (f32, f32) {
+        let mut out = [0.0; 2];
+        for ((pink, lp), o) in self.air.iter_mut().zip(out.iter_mut()) {
+            *o = lp.lp(pink.next(self.rng.bi())) * 0.08;
+        }
+        for c in &mut self.bugs {
+            if c.resting > 0 {
+                c.resting -= 1; // crickets pause now and then
+                continue;
+            }
+            c.t += 1;
+            if c.t >= c.period {
+                c.t = 0;
+                if self.rng.f() < 0.08 {
+                    c.resting = ((2.0 + 4.0 * self.rng.f()) * self.sr) as u32;
+                }
+            }
+            if c.t / c.pulse_len >= c.pulses {
+                continue;
+            }
+            let x = (c.t % c.pulse_len) as f32 / c.pulse_len as f32;
+            let env = (PI * x).sin().powi(2);
+            c.phase = (c.phase + c.freq / self.sr).fract();
+            let s = (TAU * c.phase).sin() * env * c.amp;
+            out[0] += s * (1.0 - c.pan.max(0.0));
+            out[1] += s * (1.0 + c.pan.min(0.0));
+        }
+        (out[0], out[1])
+    }
+}
+
+// ---------------------------------------------------------------- brown noise
+
+/// Deep, even noise that masks voices and traffic. Independent per ear, so it feels wide.
+struct BrownNoise {
+    rng: Rng,
+    ch: [Brown; 2],
+}
+
+impl BrownNoise {
+    fn new(_sr: f32, rng: Rng) -> Self {
+        Self { rng, ch: Default::default() }
+    }
+}
+
+impl Layer for BrownNoise {
+    fn next(&mut self) -> (f32, f32) {
+        let l = self.ch[0].next(self.rng.bi());
+        let r = self.ch[1].next(self.rng.bi());
+        (l, r)
+    }
+}
+
+// ---------------------------------------------------------------- your own recordings
+
+/// Plays a recording on a loop. A decoder thread streams it through a ring buffer of about half
+/// a second, so a long file costs no more memory than a short one.
+struct FileLayer {
+    ring: rtrb::Consumer<f32>,
+    stop: Arc<AtomicBool>,
+}
+
+impl FileLayer {
+    fn open(path: &Path, sr: f32) -> Option<Self> {
+        if let Err(e) = open_decoder(path) {
+            eprintln!("can't play {}: {e}", path.display());
+            return None; // keep the synthesized layer
+        }
+        let (producer, ring) = rtrb::RingBuffer::new((sr as usize).max(4096));
+        let stop = Arc::new(AtomicBool::new(false));
+        let (path, flag) = (path.to_path_buf(), stop.clone());
+        std::thread::Builder::new()
+            .name("sound-file".into())
+            .spawn(move || decode_loop(&path, sr, producer, &flag))
+            .ok()?;
+        Some(Self { ring, stop })
+    }
+}
+
+impl Drop for FileLayer {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+}
+
+impl Layer for FileLayer {
+    fn next(&mut self) -> (f32, f32) {
+        if self.ring.slots() < 2 {
+            return (0.0, 0.0); // decoder hasn't caught up yet
+        }
+        let l = self.ring.pop().unwrap_or(0.0);
+        let r = self.ring.pop().unwrap_or(l);
+        (l, r)
+    }
+}
+
+type Decoder = (
+    Box<dyn symphonia::core::formats::FormatReader>,
+    Box<dyn symphonia::core::codecs::audio::AudioDecoder>,
+    u32,
+);
+
+fn open_decoder(path: &Path) -> Result<Decoder, symphonia::core::errors::Error> {
+    use symphonia::core::codecs::audio::AudioDecoderOptions;
+    use symphonia::core::errors::Error;
+    use symphonia::core::formats::probe::Hint;
+    use symphonia::core::formats::{FormatOptions, TrackType};
+    use symphonia::core::io::MediaSourceStream;
+    use symphonia::core::meta::MetadataOptions;
+
+    let file = std::fs::File::open(path)?;
+    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+    let mut hint = Hint::new();
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        hint.with_extension(ext);
+    }
+    let format =
+        symphonia::default::get_probe().probe(&hint, mss, FormatOptions::default(), MetadataOptions::default())?;
+    let track = format.default_track(TrackType::Audio).ok_or(Error::Unsupported("no audio track"))?;
+    let id = track.id;
+    let params = track.codec_params.as_ref().and_then(|p| p.audio()).ok_or(Error::Unsupported("not audio"))?;
+    let decoder = symphonia::default::get_codecs().make_audio_decoder(params, &AudioDecoderOptions::default())?;
+    Ok((format, decoder, id))
+}
+
+/// Decodes the file over and over (reopening it at the end), resampled to the device rate.
+fn decode_loop(path: &Path, sr_out: f32, mut out: rtrb::Producer<f32>, stop: &AtomicBool) {
+    let mut resampler = Linear::default();
+    let mut samples: Vec<f32> = Vec::new();
+    while !stop.load(Ordering::Relaxed) {
+        let Ok((mut format, mut decoder, track)) = open_decoder(path) else { return };
+        let mut decoded_any = false;
+        while let Ok(Some(packet)) = format.next_packet() {
+            if packet.track_id != track {
+                continue;
+            }
+            let Ok(audio) = decoder.decode(&packet) else { continue };
+            let channels = audio.spec().channels().count().max(1);
+            resampler.ratio(audio.spec().rate() as f64 / sr_out as f64);
+            samples.resize(audio.samples_interleaved(), 0.0);
+            audio.copy_to_slice_interleaved(&mut samples);
+            decoded_any = true;
+            for frame in samples.chunks(channels) {
+                let (l, r) = (frame[0], *frame.get(1).unwrap_or(&frame[0]));
+                let more = resampler.push((l, r), |a, b| {
+                    while out.slots() < 2 {
+                        if stop.load(Ordering::Relaxed) {
+                            return false;
+                        }
+                        std::thread::sleep(Duration::from_millis(10)); // buffer full: wait
+                    }
+                    let _ = out.push(a);
+                    let _ = out.push(b);
+                    true
+                });
+                if !more {
+                    return;
+                }
+            }
+        }
+        if !decoded_any {
+            return; // nothing playable; don't spin
+        }
+    }
+}
+
+/// Streaming linear-interpolation resampler for stereo frames.
+#[derive(Default)]
+struct Linear {
+    step: f64,
+    frac: f64,
+    prev: Option<(f32, f32)>,
+}
+
+impl Linear {
+    fn ratio(&mut self, source_per_output: f64) {
+        self.step = if source_per_output > 0.0 { source_per_output } else { 1.0 };
+    }
+
+    /// Feeds one input frame and emits every output frame that falls before it. Stops early,
+    /// returning false, if `emit` does.
+    fn push(&mut self, cur: (f32, f32), mut emit: impl FnMut(f32, f32) -> bool) -> bool {
+        let Some(prev) = self.prev.replace(cur) else { return true };
+        while self.frac < 1.0 {
+            let t = self.frac as f32;
+            if !emit(prev.0 + (cur.0 - prev.0) * t, prev.1 + (cur.1 - prev.1) * t) {
+                return false;
+            }
+            self.frac += self.step;
+        }
+        self.frac -= 1.0;
+        true
+    }
+}
+
 // ---------------------------------------------------------------- chime
 
 /// Two soft bell notes (C5 then G5) marking the end of a phase.
@@ -588,31 +1119,86 @@ impl Chime {
 mod tests {
     use super::*;
 
-    /// Renders each layer and prints its loudness, used to balance the layers against each other.
+    /// Renders each synthesized layer and prints its loudness, used to set TRIM.
     #[test]
     fn layer_levels() {
         let sr = 48_000.0;
         let mut rng = Rng(12345);
-        let mut rain = Rain::new(sr, rng.fork());
-        let mut fire = Fire::new(sr, rng.fork());
-        let mut thunder = Thunder::new(sr, rng.fork());
-        thunder.until_next = 1;
-        let seconds = 10;
-        let n = sr as usize * seconds;
-        let stats = |name: &str, trim: f32, f: &mut dyn FnMut() -> (f32, f32)| {
+        let n = sr as usize * 20;
+        let mut loud = Vec::new();
+        for i in 0..LAYERS {
+            let (_, mut layer, trim) = make_layer(i, sr, &mut rng, None);
+            if i == 2 {
+                // thunder waits a few seconds before its first strike; measure from a strike
+                let mut t = Thunder::new(sr, Rng(777));
+                t.until_next = 1;
+                layer = Box::new(t);
+            }
             let (mut sum, mut peak) = (0.0f64, 0.0f32);
             for _ in 0..n {
-                let (l, r) = f();
+                let (l, r) = layer.next();
                 let (l, r) = (l * trim, r * trim);
                 sum += (l * l + r * r) as f64 * 0.5;
                 peak = peak.max(l.abs()).max(r.abs());
             }
             let rms = (sum / n as f64).sqrt();
-            println!("{name:8} rms {rms:.3}  peak {peak:.3}");
-            assert!(rms > 0.01 && peak < 3.0, "{name} level out of range");
-        };
-        stats("rain", TRIM[0], &mut || rain.next());
-        stats("fire", TRIM[1], &mut || fire.next());
-        stats("thunder", TRIM[2], &mut || thunder.next());
+            println!("{:9} rms {rms:.3}  peak {peak:.3}", LAYER_NAMES[i]);
+            if !(rms > 0.05 && rms < 0.2 && peak < 1.0) {
+                loud.push(LAYER_NAMES[i]);
+            }
+        }
+        assert!(loud.is_empty(), "levels out of range: {loud:?}");
+    }
+
+    #[test]
+    fn resampler_keeps_the_rate() {
+        let mut rs = Linear::default();
+        rs.ratio(44_100.0 / 48_000.0);
+        let mut emitted = 0;
+        for i in 0..44_100 {
+            rs.push((i as f32, 0.0), |_, _| {
+                emitted += 1;
+                true
+            });
+        }
+        assert!((emitted as i32 - 48_000).abs() < 3, "{emitted}");
+    }
+
+    /// Writes a short WAV, plays it as a layer at a different sample rate, and expects sound.
+    #[test]
+    fn plays_your_own_recording() {
+        let path = std::env::temp_dir().join("pomodoro-test-tone.wav");
+        let rate = 44_100u32;
+        let samples: Vec<i16> = (0..rate)
+            .flat_map(|i| {
+                let v = ((i as f32 * 440.0 * TAU / rate as f32).sin() * 12_000.0) as i16;
+                [v, v]
+            })
+            .collect();
+        let data_len = (samples.len() * 2) as u32;
+        let mut wav = Vec::new();
+        wav.extend(b"RIFF");
+        wav.extend((36 + data_len).to_le_bytes());
+        wav.extend(b"WAVEfmt ");
+        wav.extend(16u32.to_le_bytes());
+        wav.extend(1u16.to_le_bytes()); // PCM
+        wav.extend(2u16.to_le_bytes()); // stereo
+        wav.extend(rate.to_le_bytes());
+        wav.extend((rate * 4).to_le_bytes());
+        wav.extend(4u16.to_le_bytes());
+        wav.extend(16u16.to_le_bytes());
+        wav.extend(b"data");
+        wav.extend(data_len.to_le_bytes());
+        samples.iter().for_each(|s| wav.extend(s.to_le_bytes()));
+        std::fs::write(&path, wav).unwrap();
+
+        let mut layer = FileLayer::open(&path, 48_000.0).expect("WAV opens");
+        std::thread::sleep(Duration::from_millis(300)); // let the decoder fill the buffer
+        let peak = (0..4800).map(|_| layer.next().0.abs()).fold(0.0f32, f32::max);
+        assert!(peak > 0.2, "peak {peak}");
+        drop(layer);
+        let _ = std::fs::remove_file(&path);
+
+        assert!(FileLayer::open(Path::new("no-such-file.ogg"), 48_000.0).is_none());
     }
 }
