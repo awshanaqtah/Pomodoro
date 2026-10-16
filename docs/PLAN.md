@@ -66,7 +66,8 @@ a polished nature theme takes much more work); WPF or WinUI (needs the .NET runt
 | Focus | 0.4.0 | Mini mode (232×64 pill), global shortcuts (Ctrl+Alt+P / M / W), away pause that gives back the lost minutes, break ideas | ✅ done |
 | Progress | 0.5.0 | Rewards the forest gains (maples, blossoms, fireflies, moon, owl, campfire, northern lights) by sessions and best streak; forest calendar month view with each day's sessions and notes; this week by task; optional note after each focus session | ✅ done |
 | Look | 0.6.0 | Dawn, day, dusk and night palettes; seasons in the forest (spring blossoms, autumn reds, winter snow); embers while focusing and rain on breaks; small, medium and large sizes | ✅ done |
-| Bigger | 0.7.0 | Auto-update through a public releases repo; focus together with Stella through a small Cloudflare Worker relay | ⏳ next |
+| Bigger | 0.7.0 | Auto-update through the public releases repo (signed; checks a minute after start and every 6 hours; install from the tray or ⚙) | ✅ done |
+| Together | 0.8.0 | Focus together with Stella through a small Cloudflare Worker relay (waiting on a Cloudflare account) | ⏳ next |
 
 ### Phase 3: tasks, progress, rewards
 
@@ -94,3 +95,16 @@ to the same loudness.
 
 Your own recordings are never bundled: put `rain.mp3`, `fire.ogg` and so on in the Custom sounds
 folder (Sounds tab → Open folder) and that layer plays them, streamed from disk.
+
+## Releasing
+
+```powershell
+powershell -File scriptselease.ps1 -Notes "What changed"
+```
+
+The script builds a signed installer and publishes it to this repo's releases and to the public
+[Pomodoro-releases](https://github.com/awshanaqtah/Pomodoro-releases) repo along with `latest.json`,
+the feed installed copies check. Bump the version in `package.json`, `tauri.conf.json` and
+`Cargo.toml` first. The signing key and its DPAPI-protected password live in `%USERPROFILE%\.tauri`
+and never in the repo. Losing them means installed copies can't take updates until they are
+reinstalled by hand, so keep a backup of that folder somewhere safe.

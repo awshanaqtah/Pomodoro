@@ -36,6 +36,7 @@ pub struct Tray {
     skip: MenuItem<Wry>,
     mute: CheckMenuItem<Wry>,
     autostart: CheckMenuItem<Wry>,
+    update: MenuItem<Wry>,
 }
 
 // ---------------------------------------------------------------- window
@@ -179,6 +180,7 @@ pub fn build_tray(app: &AppHandle) -> tauri::Result<Tray> {
     let skip = MenuItem::with_id(app, "skip", "Skip to break", true, None::<&str>)?;
     let mute = CheckMenuItem::with_id(app, "mute", "Mute ambience", true, muted, None::<&str>)?;
     let autostart = CheckMenuItem::with_id(app, "autostart", "Start with Windows", true, autostart_enabled(), None::<&str>)?;
+    let update = MenuItem::with_id(app, "update", "Check for updates", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Pomodoro", true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
@@ -191,6 +193,7 @@ pub fn build_tray(app: &AppHandle) -> tauri::Result<Tray> {
             &mute,
             &autostart,
             &PredefinedMenuItem::separator(app)?,
+            &update,
             &quit,
         ],
     )?;
@@ -206,7 +209,7 @@ pub fn build_tray(app: &AppHandle) -> tauri::Result<Tray> {
             }
         })
         .build(app)?;
-    Ok(Tray { icon, toggle: toggle_item, skip, mute, autostart })
+    Ok(Tray { icon, toggle: toggle_item, skip, mute, autostart, update })
 }
 
 fn on_menu(app: &AppHandle, id: &str) {
@@ -231,6 +234,14 @@ fn on_menu(app: &AppHandle, id: &str) {
             }
             if let Some(t) = state.tray.get() {
                 let _ = t.autostart.set_checked(autostart_enabled());
+            }
+        }
+        "update" => {
+            let app = app.clone();
+            if app.state::<crate::update::Updates>().available() {
+                tauri::async_runtime::spawn(crate::update::install(app));
+            } else {
+                tauri::async_runtime::spawn(crate::update::check(app, false));
             }
         }
         "quit" => {
@@ -264,6 +275,16 @@ pub fn update_tray(tray: &Tray, snap: &Snapshot, last: Option<&Snapshot>) {
     let skip = if snap.mode == Mode::Focus { "Skip to break" } else { "Skip to focus" };
     let _ = tray.toggle.set_text(toggle);
     let _ = tray.skip.set_text(skip);
+}
+
+pub fn set_tray_update(app: &AppHandle, available: Option<&str>) {
+    if let Some(tray) = app.state::<App>().tray.get() {
+        let text = match available {
+            Some(v) => format!("Install update {v}"),
+            None => "Check for updates".into(),
+        };
+        let _ = tray.update.set_text(text);
+    }
 }
 
 pub fn set_tray_muted(tray: &Tray, muted: bool) {

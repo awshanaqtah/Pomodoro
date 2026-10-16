@@ -1124,6 +1124,32 @@ sizeButtons.forEach((b) =>
 );
 setInterval(applyLook, 60_000); // dawn turns to day while the widget is open
 
+// --- updates: signed, from the public releases repo ---
+
+interface UpdateState {
+  current: string;
+  available: string | null;
+  status: "idle" | "checking" | "available" | "installing" | "error";
+  error: string | null;
+}
+
+function renderUpdate(u: UpdateState) {
+  const row = document.querySelector<HTMLElement>(".update-row")!;
+  const button = $("update-btn");
+  row.classList.toggle("ready", u.status === "available");
+  button.hidden = u.status === "checking" || u.status === "installing";
+  const text: Record<UpdateState["status"], string> = {
+    idle: `Version ${u.current} · up to date`,
+    checking: "Checking for updates…",
+    available: `Version ${u.available} is ready`,
+    installing: `Installing ${u.available}… Pomodoro will reopen`,
+    error: `Couldn't check for updates (${u.error ?? "offline?"})`,
+  };
+  $("update-text").textContent = text[u.status];
+  button.textContent = u.status === "available" ? "Install" : "Check now";
+  button.onclick = () => invoke(u.status === "available" ? "update_install" : "update_check");
+}
+
 const command = (name: string) => invoke<Snapshot>(name).then(render);
 const toggle = () => command("timer_toggle");
 
@@ -1170,6 +1196,8 @@ listen("tasks-changed", () => taskCall("tasks_get", {}).then(loadProgress));
 listen<CalendarStatus>("calendar-status", (e) => renderCalendar(e.payload));
 listen<NowPlaying>("now-playing", (e) => renderMusic(e.payload));
 listen<boolean>("mini", (e) => renderMini(e.payload)); // from the shortcut or tray
+listen<UpdateState>("update", (e) => renderUpdate(e.payload));
+invoke<UpdateState>("update_state").then(renderUpdate);
 listen<Mode>("phase-done", (e) => {
   if (e.payload === "focus") loadNote();
 });

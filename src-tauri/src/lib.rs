@@ -5,6 +5,7 @@ mod rewards;
 mod stats;
 mod music;
 mod tasks;
+mod update;
 mod widget;
 
 use std::path::{Path, PathBuf};
@@ -884,6 +885,21 @@ fn shortcuts_error(app: State<'_, App>) -> Option<String> {
 }
 
 #[tauri::command]
+fn update_state(updates: State<'_, update::Updates>) -> update::UpdateState {
+    updates.state()
+}
+
+#[tauri::command]
+fn update_check(app: AppHandle) {
+    tauri::async_runtime::spawn(update::check(app, false));
+}
+
+#[tauri::command]
+fn update_install(app: AppHandle) {
+    tauri::async_runtime::spawn(update::install(app));
+}
+
+#[tauri::command]
 fn look_set(window: tauri::WebviewWindow, app: State<'_, App>, look: Look) {
     let mini = {
         let mut s = app.settings.lock().unwrap();
@@ -907,6 +923,7 @@ pub fn run() {
         // Launching Pomodoro again just brings the running widget back.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| widget::show(app)))
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(widget::on_shortcut).build())
         .on_window_event(widget::on_window_event)
         .setup(|app| {
@@ -917,6 +934,7 @@ pub fn run() {
             let (music_tx, music_rx) = mpsc::channel();
             let now_playing = Arc::new(Mutex::new(music::NowPlaying::default()));
             let _ = calendar_sync.send(()); // first sync as soon as the thread starts
+            app.manage(update::Updates::new(app.package_info().version.to_string()));
             app.manage(App {
                 timer: Mutex::new(Timer::new(settings.timeline.clamped())),
                 settings: Mutex::new(settings),
@@ -942,6 +960,7 @@ pub fn run() {
             widget::show(app.handle());
             music::spawn(app.handle().clone(), music_rx, now_playing);
             spawn_ticker(app.handle().clone());
+            update::spawn_checks(app.handle().clone());
             spawn_calendar(app.handle().clone(), calendar_wake);
             Ok(())
         })
@@ -979,6 +998,9 @@ pub fn run() {
             sounds_open_folder,
             window_mini,
             look_set,
+            update_state,
+            update_check,
+            update_install,
             shortcuts_set,
             shortcuts_error,
             window_pin
